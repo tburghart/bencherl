@@ -584,8 +584,9 @@ for bench in $BENCHES; do
         echo "Done."
 
         echo -e "===> Running benchmark"
-        rbm &
-        spin $!
+        rbm
+        # rbm &
+        # spin $!
         echo "Done."
 
         IFS=$OLD_IFS
