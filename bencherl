@@ -1,7 +1,17 @@
+#!/bin/bash
+#
+# Modified to be bash-specific (it really already was, even though it didn't
+# say so) and a lot more configurable.
+#
+# Among the newly-supported use cases, aggregating results from multiple
+# platforms is now possible without so much manual effort.
+#
 
-
-# Runs the benchmark suite based on what is specified in conf/run.conf.
-# Usage: ./bencherl [-m <mnemonic_name>]
+STARTING_PATH="$(pwd)"
+BENCHERL_ROOT="$(cd "$(dirname "$0")" && pwd)"
+BENCHERL_NAME="${0##*/}"
+BENCHERL_PATH="$BENCHERL_ROOT/$BENCHERL_NAME"
+BENCHERL_CONF="$BENCHERL_ROOT/conf/run.conf"
 
 usage()
 {
@@ -9,9 +19,13 @@ usage()
 Usage: bencherl [OPTION..]
 Run scalability benchmarks.
 
-  -h         display this help and exit
-  -l         list all the available benchmarks
-  -m <MN>    use MN as the mnemonic name of this run
+  -h        display this help and exit
+  -l        list all the available benchmarks
+  -c <FILE> read configuration from FILE (default 'conf/run.conf')
+            if FILE does not contain '/' it is assumed to be in 'conf'
+  -n <NAME> use NAME as the label of this run (default Y.M.D-H:M:S)
+            if NAME does not contain '/' it is assumed to be in 'results'
+            files in pre-existing output directories WILL be overwritten!
 
 For complete documentation, go to http://release.softlab.ntua.gr/bencherl/
 EOF
@@ -38,21 +52,21 @@ plot() {
         IFS=$'\n'
         for line in $lines
         do
-	    if [ $first -eq 1 ]; then
-	        first=0
-	    else
-	        echo -n ", "
-	    fi
-	    echo -n "'-' using 1:2 title '$line' w l lw 2"
-	    # for errorbars instead use:
-	    #echo -n "'-' using 1:2:3:4 title '$line' w yerrorlines lw 2"
+            if [ $first -eq 1 ]; then
+                first=0
+            else
+                echo -n ", "
+            fi
+            echo -n "'-' using 1:2 title '$line' w l lw 2"
+            # for errorbars instead use:
+            #echo -n "'-' using 1:2:3:4 title '$line' w yerrorlines lw 2"
         done
         echo ""
         for line in $lines
         do
-	    grstr=$(echo "$line" | sed -e 's/\([][]\)/\\\1/g')
-	    grep "$grstr" $4 | cut -f3,4
-	    echo "e"
+            grstr=$(echo "$line" | sed -e 's/\([][]\)/\\\1/g')
+            grep "$grstr" $4 | cut -f3,4
+            echo "e"
         done
         echo ""
         echo "exit"
@@ -71,46 +85,29 @@ speedup() {
         IFS=" "
         read -a nums <<< $(echo $line | cut -f4-)
         grstr=$(echo "$name" | sed -e 's/\([][]\)/\\\1/g')
+        # the embedded tab characters in the following line are crucial!
         read -a seqrun <<< $(grep "${grstr}	1	" $1 | cut -f4-)
         for ((i=0;i<${#nums[@]};i++))
         do
-	    bc -l <<< "${seqrun[i]}/${nums[i]}" | tr '\n' ' '
+            bc -l <<< "${seqrun[i]}/${nums[i]}" | tr '\n' ' '
         done
         echo ""
     done
     IFS=$OLD_IFS
 }
 
-spin()
-{
-    while ps | grep $1 &>/dev/null; do
-        i=0
-        while [ "$i" -lt "3" ]; do
-	    echo -n "."
-	    i=$[$i+1]
-	    sleep 0.5
-        done
-        i=0
-        while [ "$i" -lt "3" ]; do
-	    echo -ne '\b \b'
-	    i=$[$i+1]
-	    sleep 0.5
-        done
-    done
-}
-
-list_bms()
+list_benchmarks()
 {
     echo -n "Benchmarks:"
     for b in `ls $BENCHERL_ROOT/bench`; do
         if [ -d $BENCHERL_ROOT/bench/$b ]; then
-	    echo -n " $b"
+            echo -n " $b"
         fi
     done
     echo
 }
 
-cbm()
+compile_benchmark()
 {
     benchdir=`cd $BENCHERL_ROOT/bench/$bench; pwd`
 
@@ -127,14 +124,14 @@ cbm()
         erl_lib_dir=`$erl -noshell -eval "io:format(\"~s~n\", [code:lib_dir()]), halt()."`
 
         ( cd $BENCHERL_ROOT/bench/$bench && make bench ERLC=${erlc} ERL=${erl} ERL_LIB_DIR=${erl_lib_dir} OTP=${otpl} )
-   
+
         for app in $DEPENDENCIES; do
             ( cd $BENCHERL_ROOT/app/$app && make app ERLC=${erlc} ERL=${erl} ERL_LIB_DIR=${erl_lib_dir} OTP=${otpl} )
         done
     done
 }
 
-rbm()
+run_benchmark()
 {
     mkdir -p $outdir
     mkdir -p $measdir
@@ -144,21 +141,21 @@ rbm()
         otpv=${otp##*=}
 
         for args in $ERL_ARGS; do
-	    argsl=${args%%=*}
-	    argsv=${args##*=}
-	    IFS=$OLD_IFS
-	    n=`echo $NUMBER_OF_SLAVE_NODES | tr "," "\n" | tail -n 1`
-	    IFS=$NEW_IFS
+            argsl=${args%%=*}
+            argsv=${args##*=}
+            IFS="$OLD_IFS"
+            n=`echo $NUMBER_OF_SLAVE_NODES | tr "," "\n" | tail -n 1`
+            IFS=$NEW_IFS
 
             if [[ ( $NUMBER_OF_NUMBER_OF_SCHEDULERS -gt 1 ) || ( $NUMBER_OF_NUMBER_OF_SLAVE_NODES -eq 1 ) ]]; then
                 if [ "$n" -gt "$NSLAVE_NODES" ]; then
-		    n=$NSLAVE_NODES
+                    n=$NSLAVE_NODES
                 fi
                 for s in $NUMBER_OF_SCHEDULERS; do
-		    WHAT="sched"
-		    rsbm
+                    WHAT="sched"
+                    run_sub_benchmark
                 done
-	    fi
+            fi
 
             IFS=$OLD_IFS
             s=`echo $NUMBER_OF_SCHEDULERS | tr "," "\n" | tail -n 1`
@@ -170,14 +167,14 @@ rbm()
                         continue
                     fi
                     WHAT="node"
-                    rsbm
+                    run_sub_benchmark
                 done
             fi
         done
     done
 }
 
-rsbm()
+run_sub_benchmark()
 {
     IFS=$OLD_IFS
 
@@ -210,7 +207,8 @@ rsbm()
         done
     fi
 
-    cat > $BENCHERL_ROOT/scratch/run_bench.conf << EOF
+    [[ -d "$BENCHERL_ROOT/scratch" ]] || mkdir "$BENCHERL_ROOT/scratch"
+    cat > "$BENCHERL_ROOT/scratch/run_bench.conf" << EOF
 {bench, $bench}.
 {version, $VERSION}.
 {otp, "$otpv"}.
@@ -249,7 +247,7 @@ EOF
     eval $ERL_CMD
 
     if [ -f $BENCHERL_ROOT/bench/$bench/conf/post_bench ]; then
-	$BENCHERL_ROOT/bench/$bench/conf/post_bench $s "$otpv" "$argsv" \
+        $BENCHERL_ROOT/bench/$bench/conf/post_bench $s "$otpv" "$argsv" \
             "$COOKIE" "$SLAVE_NODES" $n "$otpl" "$EXTRA_CODE_PATH" \
             "$DEPS_PATHS" "$ERL_ENV" "$erl" "$BENCHERL_ROOT"
     fi
@@ -259,7 +257,7 @@ EOF
     IFS=$NEW_IFS
 }
 
-chkbm()
+check_benchmark()
 {
     local succeeded=1
     NF=`ls -1 $benchresdir/output/*.output | wc -l`
@@ -276,17 +274,17 @@ chkbm()
     return $succeeded
 }
 
-pbm()
+plot_benchmark()
 {
     mkdir -p $grdir
 
     if [[ ( "$NSLAVE_NODES" -gt "1" ) && ( "$NUMBER_OF_NUMBER_OF_SLAVE_NODES" -gt "1" ) ]]; then
         WHAT=node.time
-        psbm
+        plot_sub_benchmark
     fi
     if [ "$NUMBER_OF_NUMBER_OF_SCHEDULERS" -gt "1" ]; then
         WHAT=sched.time
-        psbm
+        plot_sub_benchmark
     fi
 
     if [[ ("$NSLAVE_NODES" -gt "1" ) && ( "$NUMBER_OF_NUMBER_OF_SLAVE_NODES" -gt "1") ]]; then
@@ -295,19 +293,19 @@ pbm()
             speedup $measdir/$fn.node.time >> $measdir/$fn.node.speedup
         done
         WHAT=node.speedup
-        psbm
+        plot_sub_benchmark
     fi
     if [ "$NUMBER_OF_NUMBER_OF_SCHEDULERS" -gt "1" ]; then
         for file in `ls $measdir/*.*.sched.time`; do
             fn=`basename $file .sched.time`
             speedup $measdir/$fn.sched.time >> $measdir/$fn.sched.speedup
         done
-        	WHAT=sched.speedup
-        	psbm
+                WHAT=sched.speedup
+                plot_sub_benchmark
         fi
 }
 
-psbm()
+plot_sub_benchmark()
 {
     what1=${WHAT%%\.*}
     what2=${WHAT##*\.}
@@ -411,57 +409,107 @@ nds()
     NUMBER_OF_NUMBER_OF_SLAVE_NODES=`echo $NUMBER_OF_SLAVE_NODES | tr "," "\n" | wc -l`
 }
 
-START=`date +%s`
-BENCHERL_ROOT=$(pwd)/$( dirname "${BASH_SOURCE[0]}" )
-
-while getopts ":b:chlm:s:n:pi" opt; do
-  case $opt in
-    h)
-      usage
-      exit 0
-      ;;
-    l)
-      list_bms
-      exit 0
-      ;;
-    m)
-      MNEMONIC_NAME=$OPTARG
-      ;;
-    \?)
-      echo "Invalid option: -$OPTARG"
-      exit 1
-      ;;
-  esac
+while getopts ':c:n:hl' opt
+do
+    case $opt in
+        'h' )
+            usage
+            exit 1
+            ;;
+        'l' )
+            list_benchmarks
+            exit 0
+            ;;
+        'c' )
+            BENCHERL_CONF="$OPTARG"
+            ;;
+        'n' )
+            RUN_LABEL="$OPTARG"
+            ;;
+        ':' | \? )
+            echo "$BENCHERL_NAME: Invalid option: -$OPTARG" >&2
+            exit 1
+            ;;
+        * )
+            echo "$BENCHERL_NAME: Unrecognized parameter '$opt'" >&2
+            exit 1
+            ;;
+    esac
 done
-
-source $BENCHERL_ROOT/conf/run.conf
-
-if [[ "$OSTYPE" == "darwin"* ]]; then
-    CORES=`sysctl hw.ncpu | awk '{print $2}'`
-else # Assuming that everything else is Linux! =)
-    CORES=`cat /proc/cpuinfo | grep processor | wc -l`
+if [[ $# -ge  $OPTIND ]]
+then
+    if [[ $OPTIND -gt 1 ]]
+    then
+        let 'OPTIND -= 1'
+        shift $OPTIND
+    fi
+    echo "$BENCHERL_NAME: Unrecognized parameter '$1'" >&2
+    exit 1
 fi
-
-if [ -z $MNEMONIC_NAME ]; then
-    MNEMONIC_NAME=`date +%d.%m.%y-%H.%M.%S`
+if [[ "$BENCHERL_CONF" != */* ]]
+then
+    BENCHERL_CONF="$BENCHERL_ROOT/conf/$BENCHERL_CONF"
 fi
-
-if [ -z $VERSION ]; then
-    VERSION=short
+if [[ ! -f "$BENCHERL_CONF" || ! -r "$BENCHERL_CONF" ]]
+then
+    echo "$BENCHERL_NAME: Can't read configuration file '$BENCHERL_CONF'" >&2
+    exit 2
 fi
+if [[ -z "$RUN_LABEL" ]]
+then
+    RUN_LABEL=`date +%Y.%m.%d-%H.%M.%S`
+    RESULT_PATH="$BENCHERL_ROOT/results/$RUN_LABEL"
 
-if [ -z $OUTPUT_FORMAT ]; then
-    OUTPUT_FORMAT=min
+elif [[ "$RUN_LABEL" == */* ]]
+then
+    if [[ -e "$RUN_LABEL" && ! -d "$RUN_LABEL" ]]
+    then
+        echo "$BENCHERL_NAME: Pre-existing result path '$RUN_LABEL' is not a directory" >&2
+        exit 2
+    elif [[ ! -e "$RUN_LABEL" ]] && ! mkdir -p "$RUN_LABEL"
+    then
+        exit 2
+
+    elif ! cd "$RUN_LABEL"
+    then
+        exit 2
+    fi
+    RESULT_PATH="$(pwd)"
+    cd "$STARTING_PATH"
+else
+    RESULT_PATH="$BENCHERL_ROOT/results/$RUN_LABEL"
 fi
+BENCHERL_OS="$(uname -s | tr '[[:upper:]]' '[[:lower:]]')"
+
+START=`date +%s`
+
+. "$BENCHERL_CONF"
+
+case "$BENCHERL_OS" in
+    darwin )
+        CORES="$(sysctl hw.ncpu | awk '{print $2}')"
+        ;;
+    linux )
+        CORES="$(cat /proc/cpuinfo | grep processor | wc -l)"
+        ;;
+    * )
+        echo "$BENCHERL_NAME: Not prepared for OS '$BENCHERL_OS'" >&2
+        exit 3
+        ;;
+esac
+
+[[ -n "$VERSION" ]] || VERSION='short'
+[[ -n "$OUTPUT_FORMAT" ]] || OUTPUT_FORMAT='min'
 
 LONG_MASTER="master@`hostname -f`"
 SHORT_MASTER="master@`hostname`"
 
-DEF_USE_LONG_NAMES=${USE_LONG_NAMES:-1}
+DEF_USE_LONG_NAMES="${USE_LONG_NAMES:-1}"
 DEF_OTPS=${OTPS:-"DEFOTP="}
 DEF_ERL_ARGS=${ERL_ARGS:-"DEFARGS= "}
 DEF_COOKIE=${COOKIE:-"cookie"}
-if [ "$DEF_USE_LONG_NAMES" -eq "1" ]; then
+if [[ "$DEF_USE_LONG_NAMES" -eq 1 ]]
+then
     MASTER=$LONG_MASTER
 else
     MASTER=$SHORT_MASTER
@@ -497,13 +545,6 @@ fi
 
 OLD_IFS=$IFS
 NEW_IFS=$','
-
-if [ -e $BENCHERL_ROOT/results/$MNEMONIC_NAME ]; then
-    rm -rf $BENCHERL_ROOT/results/$MNEMONIC_NAME
-fi
-resdir=$BENCHERL_ROOT/results/$MNEMONIC_NAME
-mkdir -p $resdir
-
 IFS=$NEW_IFS
 
 echo -e "\n===> Compiling suite"
@@ -528,7 +569,7 @@ done
 for bench in $BENCHES; do
 
     if [ -z $bench ]; then
-	continue;
+        continue;
     fi
 
     IFS=$OLD_IFS
@@ -557,7 +598,7 @@ for bench in $BENCHES; do
         ERL_ENV=
         WORKING_DIRECTORY=
 
-        benchresdir="$resdir/$bench"
+        benchresdir="$RESULT_PATH/$bench"
         outdir="$benchresdir/output"
         measdir="$benchresdir/measurements"
         grdir="$benchresdir/graphs"
@@ -580,20 +621,18 @@ for bench in $BENCHES; do
         IFS=$NEW_IFS
 
         echo -e "===> Compiling benchmark"
-        cbm
+        compile_benchmark
         echo "Done."
 
         echo -e "===> Running benchmark"
-        rbm
-        # rbm &
-        # spin $!
+        run_benchmark
         echo "Done."
 
         IFS=$OLD_IFS
 
         if [ "$CHECK_SANITY" == "1" ]; then
             echo -e "===> Performing sanity check"
-            chkbm
+            check_benchmark
             if [ "$?" -eq "1" ]; then
                 echo "Succeeded."
             else
@@ -601,9 +640,11 @@ for bench in $BENCHES; do
             fi
         fi
 
-	if [[ ( "$PLOT" -eq "1" ) && ( ( "$NUMBER_OF_NUMBER_OF_SLAVE_NODES" -ne "1" ) || ( "$NUMBER_OF_NUMBER_OF_SCHEDULERS" -ne "1" ) ) ]]; then
+        if [[ ( "$PLOT" -eq "1" ) && ( ( "$NUMBER_OF_NUMBER_OF_SLAVE_NODES" -ne "1" ) || ( "$NUMBER_OF_NUMBER_OF_SCHEDULERS" -ne "1" ) ) ]]; then
             echo -e "===> Plotting results"
-            pbm
+            #set -x
+            plot_benchmark
+            #set +x
             echo "Done."
         fi
     fi
