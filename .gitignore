@@ -1,7 +1,11 @@
 *.beam
+
+# crash dumps happen, don't want them checked in
 erl_crash.dump
-scratch/
-results/
+
+/*.txt
+/scratch/
+/results/
 
 # Scalaris:
 app/scalaris/Emakefile
@@ -15,3 +19,7 @@ app/scalaris/variables-nonode@nohost
 
 # ChicagoBoss
 suite/ui/ChicagoBoss-*/
+
+# Sim
+app/sim-diasca/mock-simulators/city-example/src/city-example-instances-version-*.init
+
