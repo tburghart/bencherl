@@ -1,4 +1,13 @@
-# `bencherl` - A scalability benchmark suite for Erlang
+## `bencherl` - A scalability benchmark suite for Erlang
+
+This is an almost complete rewrite of `bencherl`, so you may find the following informative:
+  * [The Original Authors' Documentation](http://release.softlab.ntua.gr/bencherl/)
+  * [The Basics of How This Version Works](docs/Overview.md)
+  * [What You Can Set in Configuration File(s), and What Happens When You Do](docs/Environment.md)
+  * [The Scripts, and What They Do](docs/Scripts.md)
+  * [The Functions, and What They Do](docs/Functions.md)
+
+## Original README
 
 ### How to get ready to build the benchmark suite ###
 
