@@ -13,6 +13,7 @@ work together.
   * [`check_benchmark_output`](#check_benchmark_output)
   * [`check_required_commands`](#check_required_commands)
   * [`count_list`](#count_list)
+  * [`display_environment`](#display_environment)
   * [`list_head`](#list_head)
   * [`parse_num_list`](#parse_num_list)
   * [`plot_benchmark_type`](#plot_benchmark_type)
@@ -23,17 +24,6 @@ work together.
   * [`sort_and_dedup_text`](#sort_and_dedup_text)
   * [`temp_dir`](#temp_dir)
   * [`temp_file`](#temp_file)
-<!--
-  * [``](#)
-  * [``](#)
-  * [``](#)
-  * [``](#)
-  * [``](#)
-  * [``](#)
-  * [``](#)
-  * [``](#)
-  * [``](#)
--->
 
 
 ### <a name="calc_speedup">`calc_speedup`</a>
@@ -46,6 +36,9 @@ work together.
 
 
 ### <a name="count_list">`count_list`</a>
+
+
+### <a name="display_environment">`display_environment`</a>
 
 
 ### <a name="list_head">`list_head`</a>
