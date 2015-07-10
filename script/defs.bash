@@ -15,23 +15,35 @@
 # by any other shell, including '/bin/sh'
 #
 # ======================================================================
+#
+# we DON'T want POSIX behavior, that's why we're using bash!
+#
+set +o posix
 
 #
 # identify package location
 # other environment setup is performed at the end of this file
 #
-BENCHERL_SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BENCHERL_ROOT="$(dirname "$BENCHERL_SCRIPTS")"
+declare -xr BENCHERL_SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+declare -xr BENCHERL_ROOT="$(dirname "$BENCHERL_SCRIPTS")"
+declare -xr BENCHERL_CWD="$(pwd)"
 
 #
-# required_{bench|plot}_commands are space-delimited lists of commands
+# _be_required_{bench|plot}_commands are space-delimited lists of commands
 # used by functions in this module
 #
 # the concatenation of these provides the default list checked by the
 # check_required_commands function if it is invoked without arguments
 #
-required_bench_commands+=''
-required_plot_commands+=''
+_be_required_bench_commands+=''
+_be_required_plot_commands+=''
+
+#
+# default config-file compatibility
+#
+_be_config_mode='main'
+_be_config_compat_main='false'
+_be_config_compat_bench='true'
 
 #
 # some easy-access constants
@@ -52,15 +64,24 @@ readonly  IFS_TABS=$'\t'
 #
 # temp file handling
 #
-[[ -n "$mktemp_template" ]] || readonly mktemp_template="/tmp/$RANDOM.$RANDOM.XXXXXXX"
-trap "/bin/rm -rf ${mktemp_template//X/?}" EXIT
+[[ -n "$_be_mktemp_template" ]] || \
+    readonly _be_mktemp_template="/tmp/$RANDOM.$RANDOM.XXXXXXX"
+trap "/bin/rm -rf ${_be_mktemp_template//X/?}" EXIT
 
 #
-# show the relevant environment
+# display_environment [-d]
+#
+# show the BENCHERL environment variables
 #
 display_environment()
 {
-    set | egrep '^BENCHERL[[:alnum:]_]*=' | sort
+    if [[ "$1" == '-d' ]]
+    then
+        declare -p $(set | \
+            sed -n 's/^\(BENCHERL[[:alnum:]_]*\)=.*$/\1/p' | sort -u)
+    else
+        set | egrep '^BENCHERL[[:alnum:]_]+=' | sort
+    fi
 }
 
 #
@@ -68,7 +89,7 @@ display_environment()
 #
 temp_dir()
 {
-    mktemp -d "$mktemp_template"
+    mktemp -d "$_be_mktemp_template"
 }
 
 #
@@ -76,7 +97,7 @@ temp_dir()
 #
 temp_file()
 {
-    mktemp "$mktemp_template"
+    mktemp "$_be_mktemp_template"
 }
 
 #
@@ -93,8 +114,82 @@ count_list()
 #
 list_head()
 {
-    echo $1
+    echo "$1"
 }
+
+#
+# echoes the last argument
+#
+list_last()
+{
+    local val
+    for val in "$@" ; do true ; done
+    echo "$val"
+}
+
+#
+# is_integer value
+#
+is_integer()
+{
+    if [[ "$1" =~ ^[+-]?[[:digit:]]+$ ]]
+    then
+        return 0
+    else
+        return 1
+    fi
+}
+
+#
+# error_exit exit-code [error-message ...]
+#
+# displays error: [$BENCHERL_CMD:] messages ...
+#
+error_exit()
+{
+    local -i xc="${1:-1}"
+    local -i fd='xc ? 2 : 1'
+    shift
+    if [[ -n "$BENCHERL_CMD" ]]
+    then
+        echo "error: ${BENCHERL_CMD}: $*" >&$fd
+    else
+        echo "error: $*" >&$fd
+    fi
+    exit $xc
+}
+
+#
+# usage_exit exit-code [error-message ...]
+#
+# if messages are specified, displays as if by error_exit()
+#
+# usage message should be in $_be_usage_message w/o leading or trailing newlines
+#
+usage_exit()
+{
+    local -i xc="${1:-1}"
+    local -i fd='xc ? 2 : 1'
+    shift
+    if [[ $# -gt 0 ]]
+    then
+        if [[ -n "$BENCHERL_CMD" ]]
+        then
+            printf '\nerror: %s: %s\n' "$BENCHERL_CMD" "$*" >&$fd
+        else
+            printf '\nerror: %s\n' "$*" >&$fd
+        fi
+    fi
+    if [[ -n "$_be_usage_message" ]]
+    then
+        printf '\n%s\n\n' "$_be_usage_message" >&$fd
+    elif [[ -n "$BENCHERL_CMD" ]]
+    then
+        printf '\nUsage: %s ...\n\n' "$BENCHERL_CMD" >&$fd
+    fi
+    exit $xc
+}
+
 
 #
 # sorts and deduplicates a list of $IFS-delimited single words
@@ -123,8 +218,8 @@ sort_and_dedup_num()
 }
 
 #
-# checks that the specified commands, or $required_commands if none are
-# specified, exist in some callable form
+# checks that the specified commands, or $_be_required_{bench|plot}_commands
+# if none are specified, exist in some callable form
 #
 # an error message is printed to standard error for each missing command
 #
@@ -135,7 +230,7 @@ check_required_commands()
     if [[ $# -lt 1 ]]
     then
         local -a cmds=($(sort_and_dedup_text \
-            $required_bench_commands $required_plot_commands))
+            $_be_required_bench_commands $_be_required_plot_commands))
     else
         local -a cmds=($(sort_and_dedup_text $*))
     fi
@@ -170,13 +265,137 @@ parse_num_list()
             echo $ival
         fi
     done)"
+    IFS="$ifsin"
     sort_and_dedup_num $list
+}
+
+#
+# filter_num_list floor integer ...
+#
+filter_num_list()
+{
+    local ifsin="$IFS"
+    IFS="$IFS_DEFAULT"
+    local -i floor="$1"
+    shift
+    local delim=''
+    local val
+    for val in "$@"
+    do
+        if [[ "$val" -ge "$floor" ]]
+        then
+            echo -n "$delim$val"
+            [[ -n "$delim" ]] || delim=' '
+        fi
+    done
+    [[ -z "$delim" ]] || echo
+    IFS="$ifsin"
+}
+
+#
+# parse_true_false value [... default]
+#
+# evaluates the first non-empty parameter (or '' if there is none)
+# and echoes 'true' or 'false'
+#
+# the parameter is evaluated as follows:
+#
+#   empty ('') ==> false
+#   zero ([+-]nnn) ==> false
+#   case-insensitive n|no|false ==> false
+#   anything else ==> true
+#
+parse_true_false()
+{
+    local ifsin="#IFS"
+    IFS="$IFS_DEFAULT"
+    local val=''
+    for val in "$@" ; do [[ -z "$val" ]] || break ; done
+    if [[ -z "$val" ]]
+    then
+        val='false'
+    elif [[ "$val" =~ ^[+-]?[[:digit:]]+$ ]]
+    then
+        if [[ $val -eq 0 ]]
+        then
+            val='false'
+        else
+            val='true'
+        fi
+    elif [[ "$val" =~ ^(([Nn][Oo]?)|([Ff][Aa][Ll][Ss][Ee]))$ ]]
+    then
+        val='false'
+    else
+        val='true'
+    fi
+    echo "$val"
+    IFS="$ifsin"
+}
+
+#
+# operates like parse_true_false, returning the oposite result
+#
+toggle_true_false()
+{
+    local ifsin="#IFS"
+    IFS="$IFS_DEFAULT"
+    if $(parse_true_false "$@")
+    then
+        echo false
+    else
+        echo true
+    fi
+    IFS="$ifsin"
+}
+
+#
+# otp_info path-to-erl-executable
+#
+# echoes major-version library-directory
+#
+otp_info()
+{
+    local erl="$1"
+    [[ -e "$erl" ]] || error_exit 2 \
+        "Erlang runtime '$erl' not found."
+    [[ -f "$erl" ]] || error_exit 3 \
+        "Erlang runtime '$erl' is not a file."
+    [[ -x "$erl" ]] || error_exit 3 \
+        "Erlang file '$erl' is not executable."
+
+    local cmds='VS = case erlang:system_info(otp_release) of'
+    cmds+=' [$R | S] -> S; S -> S end'
+    cmds+=', {MV, _} = string:to_integer(VS)'
+    cmds+=', io:format("~b ~s~n", [MV, code:lib_dir()])'
+    cmds+=', halt().'
+    "$erl" -noshell -eval "$cmds"
+}
+
+#
+# echoes a space-delimited list of available benchamrk names
+#
+list_benchmarks()
+{
+    local ifsin="#IFS"
+    IFS="$IFS_DEFAULT"
+    local bench
+    local delim=''
+    for bench in "$BENCHERL_ROOT/bench"/*
+    do
+        if [[ -d "$bench" ]]
+        then
+            echo -n "$delim${bench##*/}"
+            [[ -n "$delim" ]] || delim=' '
+        fi
+    done
+    [[ -z "$delim" ]] || echo
     IFS="$ifsin"
 }
 
 #
 # plot_graph title X-label Y-label input-data output-graph
 #
+declare _be_create_plot_temp
 plot_graph()
 {
     local ifsin="$IFS"
@@ -186,10 +405,10 @@ plot_graph()
     local ifile="$4"
     local ofile="$5"
 
-    [[ -n "$_create_plot_temp_" && -f "$_create_plot_temp_" ]] || \
-        _create_plot_temp_="$(temp_file)"
+    [[ -n "$_be_create_plot_temp" && -f "$_be_create_plot_temp" ]] || \
+        _be_create_plot_temp="$(temp_file)"
 
-    local pfile="$_create_plot_temp_"
+    local pfile="$_be_create_plot_temp"
     local label="$(tr -sC '[:alnum:]' '_' <<< "$title")"
     label="${label#_}"
     label="${label%_}"
@@ -236,7 +455,7 @@ EOF
     IFS="$ifsin"
     gnuplot "$pfile"
 }
-required_plot_commands+=' fgrep gnuplot'
+_be_required_plot_commands+=' fgrep gnuplot'
 
 #
 # calc_speedup input-file output-file
@@ -270,9 +489,9 @@ calc_speedup()
                 index=0
                 while [[ $index -lt $count ]]
                 do
-                    bc -l <<< "scale=6${N}${bases[$index]} / ${times[$index]}" | tr "$N" "$S"
+                    bc -l <<< "scale=6; ${bases[$index]}/${times[$index]}"
                     let 'index += 1'
-                done
+                done | tr "$N" "$S"
                 echo
             fi
         fi
@@ -281,7 +500,7 @@ calc_speedup()
 
     IFS="$ifsin"
 }
-required_plot_commands+=' fgrep bc'
+_be_required_plot_commands+=' fgrep bc'
 
 #
 # plot_benchmark_type benchmark Y-type X-type measurements graphs
@@ -310,8 +529,7 @@ plot_benchmark_type()
             xaxis='Number of Schedulers'
             ;;
         * )
-            echo "Error: plot_benchmark_type: X-type '$xtype' is not valid." >&2
-            return  1
+            error_exit 1 "plot_benchmark_type: X-type '$xtype' is not valid."
             ;;
     esac
     case "$ytype" in
@@ -322,8 +540,7 @@ plot_benchmark_type()
             yaxis='Speedup'
             ;;
         * )
-            echo "Error: plot_benchmark_type: Y-type '$ytype' is not valid." >&2
-            return  1
+            error_exit 1 "plot_benchmark_type: Y-type '$ytype' is not valid."
             ;;
     esac
     local fext="$xtype.$ytype"
@@ -342,10 +559,10 @@ plot_benchmark_type()
     if [[ -n "$otps" ]]
     then
         otps="$(sort_and_dedup_text $otps)"
-        local notps="$(count_list $otps)"
+        local -i notps="$(count_list $otps)"
 
         cfgs="$(sort_and_dedup_text $cfgs)"
-        local ncfgs="$(count_list $cfgs)"
+        local -i ncfgs="$(count_list $cfgs)"
 
         local label ofile
         local patt="^\\([^${T}]*\\)${T}\\(.*\\)\$"
@@ -453,54 +670,66 @@ check_benchmark_output()
 # ======================================================================
 
 #
-# all runtime I/O goes into the /tmp directory for speed
+# by default, runtime I/O goes into the /tmp directory for speed
 #
-BENCHERL_WORK="$(temp_dir)"
+if [[ -z "$BENCHERL_WORK" ]]
+then
+    BENCHERL_WORK="$(temp_dir)"
+elif [[ ! -d "$BENCHERL_WORK" ]]
+then
+    mkdir "$BENCHERL_WORK"
+fi
+readonly  BENCHERL_WORK
+export    BENCHERL_WORK
 
-BENCHERL_OS="$(uname -s)"
+declare -xr BENCHERL_OS="$(uname -s)"
 case "$BENCHERL_OS" in
     Darwin )
-        BENCHERL_PCPUS="$(sysctl hw.physicalcpu | awk '{print $2}')"
-        BENCHERL_LCPUS="$(sysctl hw.logicalcpu | awk '{print $2}')"
-        BENCHERL_CORES="$(sysctl hw.ncpu | awk '{print $2}')"
+        declare -ixr BENCHERL_CORES="$(sysctl hw.ncpu | awk '{print $2}')"
+        declare -ixr BENCHERL_LCPUS="$(sysctl hw.logicalcpu | awk '{print $2}')"
+        declare -ixr BENCHERL_PCPUS="$(sysctl hw.physicalcpu | awk '{print $2}')"
         ;;
-    *BSD )
-        BENCHERL_PCPUS="$(sysctl hw.physicalcpu | awk '{print $2}')"
-        BENCHERL_LCPUS="$(sysctl hw.logicalcpu | awk '{print $2}')"
-        BENCHERL_CORES="$(sysctl hw.ncpu | awk '{print $2}')"
-        echo "$BENCHERL_OS CPU calculation is UNTESTED - check it!" >&2
-        return 3
+    FreeBSD )
+        declare -ixr BENCHERL_CORES="$(sysctl hw.ncpu | awk '{print $2}')"
+        declare -ixr BENCHERL_LCPUS="$BENCHERL_CORES"
+        if [[ $BENCHERL_CORES -gt 1 ]]
+        then
+            # assume the lowest number is logical CPUs per physical CPU
+            declare -i _be_cpu_div="$( \
+                sysctl kern.sched.topology_spec | sed -En \
+                's/^[[:space:]]*<cpu[[:space:]]+count="([[:digit:]]+)".*$/\1/p' \
+                | sort -gu | head -1)"
+            declare -ixr BENCHERL_PCPUS="$(($BENCHERL_LCPUS / $_be_cpu_div))"
+            unset _be_cpu_div
+        else
+            declare -ixr BENCHERL_PCPUS="$BENCHERL_CORES"
+        fi
         ;;
     Linux )
-        BENCHERL_CORES="$(cat /proc/cpuinfo | grep processor | wc -l)"
-        echo "$BENCHERL_OS CPU calculation is INCOMPLETE!"
-        return 3
+        declare -ixr BENCHERL_CORES="$(egrep \
+            '^processor[[:space:]]*:' /proc/cpuinfo | wc -l)"
+        declare -ixr BENCHERL_LCPUS="$BENCHERL_CORES"
+        declare -ixr BENCHERL_PCPUS="$(egrep \
+            '^core id[[:space:]]*:' /proc/cpuinfo | sort -u | wc -l)"
         ;;
     SunOS )
-        BENCHERL_PCPUS="$(count_list $(kstat -m cpu_info | grep core_id | awk '{print $2}' | sort -u))"
-        BENCHERL_LCPUS="$(count_list $(kstat -m cpu_info | grep 'module: cpu_info' | awk '{print $4}' | sort -u))"
-        echo "$BENCHERL_OS CPU calculation is UNTESTED - check it!" >&2
-        return 3
+        declare -ixr BENCHERL_LCPUS="$(count_list $(kstat -m cpu_info \
+            | grep 'module: cpu_info' | awk '{print $4}' | sort -u))"
+        declare -ixr BENCHERL_PCPUS="$(count_list $(kstat -m cpu_info \
+            | grep core_id | awk '{print $2}' | sort -u))"
+        declare -ixr BENCHERL_CORES="$BENCHERL_LCPUS"
+        error_exit 3 "$BENCHERL_OS CPU calculation is UNTESTED - check it!"
         ;;
     * )
-        echo "Error: Not prepared for OS '$BENCHERL_OS'" >&2
-        return 3
+        error_exit 3 "Not prepared for OS '$BENCHERL_OS'"
         ;;
 esac
-[[ -n "$BENCHERL_CORES" ]] || BENCHERL_CORES="${BENCHERL_LCPUS:-${BENCHERL_PCPUS}}"
 if [[ -z "$BENCHERL_CORES" || "$BENCHERL_CORES" -lt 1 ]]
 then
     # this shouldn't have slipped through, but obviously it did
-    echo "Error: $BENCHERL_OS CPU calculation failed!" >&2
-    return 3
+    error_exit 3 "$BENCHERL_OS CPU calculation failed!"
 fi
 
-# BENCHERL_CONFIG="$BENCHERL_WORK/run_bench.config"
-BENCHERL_CONFIG="$BENCHERL_ROOT/scratch/run_bench.conf"
-
-#
-# all accessible from child processes
-#
-export  BENCHERL_ROOT BENCHERL_SCRIPTS BENCHERL_WORK BENCHERL_CONFIG
-export  BENCHERL_OS BENCHERL_CORES BENCHERL_LCPUS BENCHERL_PCPUS
+# declare -xr BENCHERL_BECONFIG="$BENCHERL_WORK/run_bench.config"
+declare -xr BENCHERL_BECONFIG="$BENCHERL_ROOT/scratch/run_bench.conf"
 

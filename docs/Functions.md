@@ -14,16 +14,24 @@ work together.
   * [`check_required_commands`](#check_required_commands)
   * [`count_list`](#count_list)
   * [`display_environment`](#display_environment)
+  * [`error_exit`](#error_exit)
+  * [`filter_num_list`](#filter_num_list)
+  * [`is_integer`](#is_integer)
+  * [`list_benchmarks`](#list_benchmarks)
   * [`list_head`](#list_head)
+  * [`list_last`](#list_last)
+  * [`otp_info`](#otp_info)
   * [`parse_num_list`](#parse_num_list)
-  * [`plot_benchmark_type`](#plot_benchmark_type)
+  * [`parse_true_false`](#parse_true_false)
   * [`plot_benchmark`](#plot_benchmark)
+  * [`plot_benchmark_type`](#plot_benchmark_type)
   * [`plot_graph`](#plot_graph)
-  * [`run_bechmark`](#run_bechmark)
   * [`sort_and_dedup_num`](#sort_and_dedup_num)
   * [`sort_and_dedup_text`](#sort_and_dedup_text)
   * [`temp_dir`](#temp_dir)
   * [`temp_file`](#temp_file)
+  * [`toggle_true_false`](#toggle_true_false)
+  * [`usage_exit`](#usage_exit)
 
 
 ### <a name="calc_speedup">`calc_speedup`</a>
@@ -41,22 +49,40 @@ work together.
 ### <a name="display_environment">`display_environment`</a>
 
 
+### <a name="error_exit">`error_exit`</a>
+
+
+### <a name="filter_num_list">`filter_num_list`</a>
+
+
+### <a name="is_integer">`is_integer`</a>
+
+
+### <a name="list_benchmarks">`list_benchmarks`</a>
+
+
 ### <a name="list_head">`list_head`</a>
+
+
+### <a name="list_last">`list_last`</a>
+
+
+### <a name="otp_info">`otp_info`</a>
 
 
 ### <a name="parse_num_list">`parse_num_list`</a>
 
 
-### <a name="plot_benchmark_type">`plot_benchmark_type`</a>
+### <a name="parse_true_false">`parse_true_false`</a>
 
 
 ### <a name="plot_benchmark">`plot_benchmark`</a>
 
 
+### <a name="plot_benchmark_type">`plot_benchmark_type`</a>
+
+
 ### <a name="plot_graph">`plot_graph`</a>
-
-
-### <a name="run_bechmark">`run_bechmark`</a>
 
 
 ### <a name="sort_and_dedup_num">`sort_and_dedup_num`</a>
@@ -71,5 +97,9 @@ work together.
 ### <a name="temp_file">`temp_file`</a>
 
 
+### <a name="toggle_true_false">`toggle_true_false`</a>
+
+
+### <a name="usage_exit">`usage_exit`</a>
 
 
