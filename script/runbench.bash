@@ -1,8 +1,26 @@
 #!/usr/bin/false This file is meant to be sourced, not run!
+#
+# There are so many variables that need to be set properly ... assume they are
+#
+# This file *may* be invoked repeatedly in the same environment, so assume
+# anything set in here may remain and need to be cleaned up before reuse
+#
 
+IFS="$IFS_DEFAULT"
 #
-# There are too many variables that need to be set properly ... assume they are
+# The Makefiles require GNU make, so try to find a command that behaves
+# like it, which *may not* be a file!
 #
+for _be_make in $_be_make $MAKE gmake make
+do
+    if  type -t "$_be_make" 1>/dev/null 2>&1 && \
+        [[ "$("$_be_make" --version 2>/dev/null \
+            | head -1 | awk '{print $1}')" == 'GNU' ]]
+    then
+        break
+    fi
+done
+
 unset _be_bench_deps _be_extra_code
 
 IFS="${IFS_DEFAULT},"
@@ -80,7 +98,7 @@ do
             _be_appd="$_be_apps_work/$_be_app/$BENCHERL_OTP"
             _be_ebin="$_be_appd/ebin"
             [[ -d "$_be_ebin" ]] || mkdir -p "$_be_ebin"
-            make app \
+            "$_be_make" app \
                 "OTP=$BENCHERL_OTP" "ERL=$BENCHERL_ERL" "ERLC=$_be_erlc" \
                 "OTPREL=$_be_erlrt_info" "EBIN=$_be_ebin" "APPD=$_be_appd" \
                 "ERLC_OPTS=$_be_erlc_opts" "ERL_LIB_DIR=$_be_erlrt_code"
@@ -92,7 +110,7 @@ do
     cd "$BENCHERL_ROOT/suite"
     _be_ebin="$_be_suite_ebin"
     [[ -d "$_be_ebin" ]] || mkdir -p "$_be_ebin"
-    make suite \
+    "$_be_make" suite \
         "OTP=$BENCHERL_OTP" "ERL=$BENCHERL_ERL" "ERLC=$_be_erlc" \
         "OTPREL=$_be_erlrt_info" "EBIN=$_be_ebin" "ERL_LIB_DIR=$_be_erlrt_code"
     _be_bench_code[${#_be_bench_code[@]}]="$_be_ebin"
@@ -100,7 +118,7 @@ do
     cd "$BENCHERL_BENCHDIR"
     _be_ebin="$_be_bench_ebin"
     [[ -d "$_be_ebin" ]] || mkdir -p "$_be_ebin"
-    make bench \
+    "$_be_make" bench \
         "OTP=$BENCHERL_OTP" "ERL=$BENCHERL_ERL" "ERLC=$_be_erlc" \
         "OTPREL=$_be_erlrt_info" "EBIN=$_be_ebin" \
         "ERLC_OPTS=-pa ${_be_bench_code[*]}" "ERL_LIB_DIR=$_be_erlrt_code"
