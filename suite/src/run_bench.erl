@@ -5,36 +5,79 @@
 
 -module(run_bench).
 
--export([main/0]).
+-export([main/0, main/1]).
 
 -include_lib("kernel/include/inet.hrl").
 
 main() ->
+    ConfigFile = case os:getenv("BENCHERL_BECONFIG") of
+        false ->
+            case os:getenv("BENCHERL_ROOT") of
+                false ->
+                    error_exit('BadConfig',
+                        "No suitabe environment variable present");
+                Dir ->
+                    Dir ++ "/scratch/run_bench.conf"
+            end;
+        File ->
+            File
+    end,
+    main(ConfigFile).
+
+main(ConfigFile) ->
+    case file:consult(ConfigFile) of
+        {ok, Config} ->
+            run_bench(Config);
+        {error, {_, _, _} = Reason} ->
+            error_exit('ConfigFileFormat', Reason);
+        {error, IO} ->
+            error_exit(IO, ConfigFile)
+    end.
+
+error_exit(Error, Reason) ->
+    io:format(standard_error, "Error '~s': ~p~n", [Error, Reason]),
+    erlang:halt(1).
+
+error_exit(Error, Reason, Trace) ->
+    io:format(standard_error,
+        "Exception '~s':~n~p~n~p~n", [Error, Reason, Trace]),
+    erlang:halt(1).
+
+config_value(Config, Key) ->
+    case lists:keyfind(Key, 1, Config) of
+        false ->
+            error({'ConfigKeyMissing', Key});
+        {Key, Value} ->
+            Value
+    end.
+
+config_value(Config, Key, Default) ->
+    case lists:keyfind(Key, 1, Config) of
+        false ->
+            Default;
+        {Key, Value} ->
+            Value
+    end.
+
+run_bench(Config) ->
     try
-        %% Load run configuration settings.
-	 BencherlRoot = os:getenv("BENCHERL_ROOT"),
-        {ok,Conf} = file:consult(BencherlRoot ++ "/scratch/run_bench.conf"),
-        {_,M} = lists:keyfind(bench, 1, Conf),
-        {_,Version} = lists:keyfind(version, 1, Conf),
-        {_,OTP} = lists:keyfind(otp, 1, Conf),
-        {_,OutputFormat} = lists:keyfind(output_format, 1, Conf),
-        ErlProgram = case OTP of
-                         [] -> "erl";
-                         _  -> OTP ++ "/bin/erl"
-                     end,
-        {_,ErlArgs} = lists:keyfind(erl_args, 1, Conf),
-        {_,Master} = lists:keyfind(master, 1, Conf),
-        {_,Snames} = lists:keyfind(slaves, 1, Conf),
-        {_,N} = lists:keyfind(number_of_slaves, 1, Conf),
-        {_,S} = lists:keyfind(number_of_schedulers, 1, Conf),
-        {_,Iterations} = lists:keyfind(iterations, 1, Conf),
-        {_,OutFile} = lists:keyfind(outfile, 1, Conf),
-        {_,MeasFile} = lists:keyfind(measfile, 1, Conf),
-        {_,DataDir} = lists:keyfind(datadir, 1, Conf),
-        {_,What} = lists:keyfind(what, 1, Conf),
-        {_,UseLongNames} = lists:keyfind(use_long_names, 1, Conf),
-        {_,Cores} = lists:keyfind(number_of_cores, 1, Conf),
-        {_,SkipSlaveSetup} = lists:keyfind(skip_slave_setup, 1, Conf),
+        BenchMod = config_value(Config, bench),
+        Version = config_value(Config, version, short),
+        OutputFormat = config_value(Config, output_format, 'avg_min_max'),
+        ErlExec = config_value(Config, erl_exec, "erl"),
+        ErlArgs = config_value(Config, erl_args),
+        Master = config_value(Config, master),
+        Snames = config_value(Config, slaves, []),
+        N = config_value(Config, number_of_slaves, 0),
+        S = config_value(Config, number_of_schedulers),
+        Iterations = config_value(Config, iterations, 1),
+        OutFile = config_value(Config, outfile),
+        MeasFile = config_value(Config, measfile),
+        DataDir = config_value(Config, datadir),
+        What = config_value(Config, what),
+        UseLongNames = config_value(Config, use_long_names),
+        Cores = config_value(Config, number_of_cores),
+        SkipSlaveSetup = (config_value(Config, setup_slaves) == false),
 
         NS = case What of
                  node  -> N;
@@ -44,7 +87,7 @@ main() ->
 	%% Start the slaves (if necessary).
         Slaves =
            case SkipSlaveSetup of
-              false -> lists:map(fun(Sn) -> 
+              false -> lists:map(fun(Sn) ->
                           [Name|Rest] = string:tokens(atom_to_list(Sn), "@"),
                           {ok, Host} = case Rest of
                                           [] ->
@@ -57,9 +100,9 @@ main() ->
                                              end;
                                           _ -> {ok, hd(Rest)}
                                        end,
-                          {ok, Slave} = slave:start(list_to_atom(Host), 
-                                           list_to_atom(Name), ErlArgs, self(), 
-                                           ErlProgram),
+                          {ok, Slave} = slave:start(list_to_atom(Host),
+                                           list_to_atom(Name), ErlArgs, self(),
+                              ErlExec),
                           Slave
                        end, lists:sublist(Snames, N));
               true -> lists:sublist(Snames, N)
@@ -71,13 +114,13 @@ main() ->
 
 	%% Run the benchmark for all argument sets.
         RunFun = fun(Coordinator, CurArgs) -> group_leader(OF, self()),
-                    T0 = now(),
-                    Return = apply(M, run, [CurArgs, Slaves, [{datadir, DataDir}, {master, Master}, {schedulers, S}]]),
-                    Dur = timer:now_diff(now(), T0)/1000,
+                    T0 = os:timestamp(),
+                    Return = apply(BenchMod, run, [CurArgs, Slaves, [{datadir, DataDir}, {master, Master}, {schedulers, S}]]),
+                    Dur = timer:now_diff(os:timestamp(), T0)/1000,
                     Coordinator ! {done, {Return, Dur}}
         end,
         RecordFun = fun(Text, Times) ->
-                LabelFormat = 
+                LabelFormat =
                     begin
                         case Text of
                             {_, _} -> "~p";
@@ -104,7 +147,7 @@ main() ->
 			plain -> Times
 		end,
                 case Text of
-                    {Str, L} -> 
+                    {Str, L} ->
                         FStr = remove_whitespace_and_new_lines(lists:flatten(io_lib:format(LabelFormat,[Str]))),
                         io:format(MF, "~s\t~w\t~p\t", [FStr, L, NS]);
                     _ ->
@@ -138,7 +181,7 @@ main() ->
                         T -> lists:foreach(fun({Name, SubTimes}) -> RecordFun({Name, Bargs}, SubTimes) end, T)
                     end
             end,
-        lists:foreach(Fun, M:bench_args(Version, [{number_of_cores, Cores}, {slaves, Slaves}])),
+        lists:foreach(Fun, BenchMod:bench_args(Version, [{number_of_cores, Cores}, {slaves, Slaves}])),
         file:close(OF),
 
 	%% Close the measurements file.
@@ -151,9 +194,8 @@ main() ->
         end
 
     catch
-        E:D ->
-            io:format("Exception ~p while running benchmark:\n~p\n~p\n",
-                      [E, D, erlang:get_stacktrace()])
+        Error:Reason ->
+            error_exit(Error, Reason, erlang:get_stacktrace())
     end.
 
 

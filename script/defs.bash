@@ -128,6 +128,22 @@ list_last()
 }
 
 #
+# list_member target element ...
+#
+list_member()
+{
+    [[ $# -gt 1 ]] || return 1
+    local target="$1"
+    shift
+    local val
+    for val in "$@"
+    do
+        [[ "$val" != "$target" ]] || return 0
+    done
+    return 1
+}
+
+#
 # is_integer value
 #
 is_integer()
@@ -170,9 +186,9 @@ usage_exit()
 {
     local -i xc="${1:-1}"
     local -i fd='xc ? 2 : 1'
-    shift
-    if [[ $# -gt 0 ]]
+    if [[ $# -gt 1 ]]
     then
+        shift
         if [[ -n "$BENCHERL_CMD" ]]
         then
             printf '\nerror: %s: %s\n' "$BENCHERL_CMD" "$*" >&$fd
@@ -730,6 +746,6 @@ then
     error_exit 3 "$BENCHERL_OS CPU calculation failed!"
 fi
 
-# declare -xr BENCHERL_BECONFIG="$BENCHERL_WORK/run_bench.config"
-declare -xr BENCHERL_BECONFIG="$BENCHERL_ROOT/scratch/run_bench.conf"
+# declare -xr BENCHERL_BECONFIG="$BENCHERL_ROOT/scratch/run_bench.conf"
+declare -xr BENCHERL_BECONFIG="$BENCHERL_WORK/run_bench.config"
 

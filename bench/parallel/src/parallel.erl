@@ -20,11 +20,12 @@
 %% Created : 16 April 2010
 
 -module(parallel).
+-behavior(benchmark).
 
 -export([bench_args/2, run/3]).
 
 bench_args(Version, Conf) ->
-    {_,Cores} = lists:keyfind(number_of_cores, 1, Conf),
+    {_, Cores} = lists:keyfind(number_of_cores, 1, Conf),
 	[F1, F2] = case Version of
 		short -> [313, 4];
 		intermediate -> [469, 8];
@@ -41,7 +42,7 @@ run([N,M|_], _, _) ->
 	ok.
 
 loop(Pid, 0, Out) -> Pid ! {self(), check_now(Out)};
-loop(Pid, N, Out) -> loop(Pid, N - 1, [now()|Out]).
+loop(Pid, N, Out) -> loop(Pid, N - 1, [os:timestamp()|Out]).
 
 check_now([_,_]) -> ok;
 check_now([_|Ts]) -> check_now(Ts).

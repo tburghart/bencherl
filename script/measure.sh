@@ -1,8 +1,6 @@
 #!/bin/bash -e
 
-. "$(dirname "${BASH_SOURCE[0]}")/defs.bash"
-
-BENCHERL_CMD="${0##*/}"
+declare -rx BENCHERL_CMD="${0##*/}"
 
 _be_usage_message="Usage: $BENCHERL_CMD [option ...]
 Options:
@@ -29,6 +27,8 @@ BENCHERL_LABEL:
 BENCHERL_WORK:
     Directory for temporary files. If the directory does not exist it is
     created. Default is a transient directory under '/tmp'."
+
+. "$(dirname "${BASH_SOURCE[0]}")/defs.bash"
 
 _be_pre_func=''
 _be_post_func=''
@@ -96,9 +96,9 @@ then
 fi
 
 . "$BENCHERL_CONF"
+
 _be_config_mode='main'
 . "$BENCHERL_SCRIPTS/normalize.bash"
-_be_config_mode='bench'
 
 if [[ -n "$_be_post_func" ]]
 then
@@ -106,5 +106,43 @@ then
     exit
 fi
 
+IFS="${IFS_DEFAULT},"
+declare -a _be_include=($BENCHERL_INCLUDE)
+declare -a _be_exclude=($BENCHERL_EXCLUDE)
+IFS="$IFS_DEFAULT"
+if  [[ ${#_be_include[@]} -eq 0 && ${#_be_exclude[@]} -ne 0 ]] \
+    || list_member '*' "${_be_include[@]}"
+then
+    unset _be_include
+    declare -a _be_include=($(list_benchmarks))
+fi
+
+declare -a _be_benchmarks
+for _be_bench in "${_be_include[@]}"
+do
+    if ! list_member "$_be_bench" "${_be_exclude[@]}"
+    then
+        [[ -d "$BENCHERL_ROOT/bench/$_be_bench" ]] || \
+            error_exit 2 "Specified benchmark '$_be_bench' not found."
+        list_member "$_be_bench" "${_be_benchmarks[@]}" || \
+            _be_benchmarks[${#_be_benchmarks[@]}]="$_be_bench"
+    fi
+done
+[[ ${#_be_benchmarks[@]} -gt 0 ]] || error_exit 1 'No benchmarks selected.'
+
+unset _be_include _be_exclude
+
 [[ -d "$BENCHERL_RESULTS" ]] || mkdir "$BENCHERL_RESULTS"
 
+for _be_bench in "${_be_benchmarks[@]}"
+do
+    BENCHERL_BENCHNAME="$_be_bench"
+    BENCHERL_BENCHDIR="$BENCHERL_ROOT/bench/$_be_bench"
+    export  BENCHERL_BENCHNAME BENCHERL_BENCHDIR
+    if [[ -f "$BENCHERL_BENCHDIR/conf/bench.conf" ]]
+    then
+        "$BENCHERL_SCRIPTS/confbench.bash"
+    else
+        . "$BENCHERL_SCRIPTS/runbench.bash"
+    fi
+done

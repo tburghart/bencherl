@@ -1,26 +1,27 @@
-ERLC = erlc 
-ERLC_OPTS = 
-ERL = erl
-ERL_LIB_DIR = 
+#
+# standard bencherl makefile
+#
+ERL   ?= erl
+ERLC  ?= erlc
+EBIN  ?= ebin-${OTP}
 
-SRCD = src
-EBIND = ebin-$(OTP)
+override ERLC_OPTS += -Werror
 
-ERLF = $(wildcard $(SRCD)/*.erl)
-BEAMF = $(patsubst $(SRCD)/%.erl,$(EBIND)/%.beam,$(ERLF))
+ERLF  = $(wildcard src/*.erl)
+BEAMF = $(patsubst src/%.erl,$(EBIN)/%.beam,$(ERLF))
 
 .PHONY: bench clean
 
 bench: $(BEAMF)
 
-$(EBIND)/%.beam: $(SRCD)/%.erl
-	$(ERLC) $(ERLC_OPTS) -o$(EBIND) $<
+$(EBIN)/%.beam: src/%.erl
+	$(ERLC) $(ERLC_OPTS) -o$(EBIN) $<
 
-$(BEAMF): | $(EBIND)
+$(BEAMF): | $(EBIN)
 
-$(EBIND):
-	mkdir -p $(EBIND)
+$(EBIN):
+	mkdir -p $(EBIN)
 
 clean:
-	$(RM) -rf ebin-*
+	$(RM) -rf $(EBIN)/*
 

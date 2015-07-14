@@ -1,7 +1,7 @@
 #!/usr/bin/false This file is meant to be sourced, not run!
 # ======================================================================
 #
-# normalize BENCHERL_xxx variables after sourcing a config file
+# normalize and export BENCHERL_xxx variables after sourcing a config file
 #
 # assumes that defs.bash has already been sourced
 #
@@ -128,11 +128,13 @@ then
 else
     BENCHERL_RESULTS="$BENCHERL_ROOT/results/$BENCHERL_LABEL"
 fi
+export  BENCHERL_LABEL BENCHERL_RESULTS
 
 if ! is_integer "$BENCHERL_ITERATIONS" || [[ "$BENCHERL_ITERATIONS" -lt 1 ]]
 then
     BENCHERL_ITERATIONS='1'
 fi
+export  BENCHERL_ITERATIONS
 
 case "$BENCHERL_LENGTH" in
     short|intermediate|long )
@@ -144,6 +146,8 @@ case "$BENCHERL_LENGTH" in
         BENCHERL_LENGTH='short'
         ;;
 esac
+export  BENCHERL_LENGTH
+
 case "$BENCHERL_OUTPUT" in
     min|max|avg|avg_min_max|plain )
         ;;
@@ -151,10 +155,13 @@ case "$BENCHERL_OUTPUT" in
         BENCHERL_OUTPUT='avg'
         ;;
 esac
+export  BENCHERL_OUTPUT
 
 [[ -n "$BENCHERL_COOKIE" ]] || BENCHERL_COOKIE="bencherl$RANDOM"
+export  BENCHERL_COOKIE
 
 BENCHERL_CHECK_SANITY="$(parse_true_false "$BENCHERL_CHECK_SANITY" 'false')"
+export  BENCHERL_CHECK_SANITY
 
 _be_unset_vars+=' _be_node_suffix'
 [[ -n "$BENCHERL_HOSTNAME" ]] || BENCHERL_HOSTNAME="$(hostname)"
@@ -165,6 +172,7 @@ then
 else
     _be_node_suffix=''
 fi
+export  BENCHERL_HOSTNAME BENCHERL_USE_LONGNAMES
 
 declare -i  _be_count _be_index _be_alt_x
 _be_unset_vars+=' _be_count _be_index _be_alt_x _be_data'
@@ -181,11 +189,15 @@ then
 fi
 IFS=','
 BENCHERL_NUM_SCHEDULERS="${BENCHERL_NUM_SCHEDULERS_A[*]}"
+export  BENCHERL_NUM_SCHEDULERS BENCHERL_NUM_SCHEDULERS_A
 IFS="$IFS_DEFAULT"
 
 [[ -n "$BENCHERL_MASTER" ]] || BENCHERL_MASTER="master$_be_node_suffix"
+export  BENCHERL_MASTER
 
 BENCHERL_SETUP_SLAVES="$(parse_true_false "$BENCHERL_SETUP_SLAVES" 'true')"
+export  BENCHERL_SETUP_SLAVES
+
 [[ -n "$BENCHERL_NUM_SLAVES" ]] || BENCHERL_NUM_SLAVES='0'
 
 unset BENCHERL_NUM_SLAVES_A BENCHERL_SLAVES_A
@@ -209,6 +221,8 @@ fi
 IFS=','
 BENCHERL_NUM_SLAVES="${BENCHERL_NUM_SLAVES_A[*]}"
 BENCHERL_SLAVES="${BENCHERL_SLAVES_A[*]}"
+export  BENCHERL_NUM_SLAVES BENCHERL_NUM_SLAVES_A
+export  BENCHERL_SLAVES BENCHERL_SLAVES_A
 # IFS remains ','
 
 unset BENCHERL_OTPS_A
@@ -255,6 +269,7 @@ then
     IFS=','
 fi
 BENCHERL_OTPS="${BENCHERL_OTPS_A[*]}"
+export  BENCHERL_OTPS BENCHERL_OTPS_A
 # IFS remains ','
 
 [[ -n "$BENCHERL_VMARGS" ]] || BENCHERL_VMARGS='Default='
@@ -280,6 +295,7 @@ do
     let '_be_count += 1'
 done
 BENCHERL_VMARGS="${BENCHERL_VMARGS_A[*]}"
+export  BENCHERL_VMARGS BENCHERL_VMARGS_A
 
 IFS="$IFS_DEFAULT"
 unset $_be_unset_vars _be_unset_vars

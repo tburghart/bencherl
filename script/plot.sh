@@ -1,8 +1,6 @@
 #!/bin/bash -e
 
-. "$(dirname "${BASH_SOURCE[0]}")/defs.bash"
-
-BENCHERL_CMD="${0##*/}"
+declare -rx BENCHERL_CMD="${0##*/}"
 
 _be_usage_message="Usage: $BENCHERL_CMD \
 <benchmark-title> <measurements-directory> <graphs-directory>
@@ -10,6 +8,8 @@ _be_usage_message="Usage: $BENCHERL_CMD \
 Collects all of the *.time files in the specified measurements directory
 and generates appropriate SVG graphs in the specified graphs directory.
 NOTE that *.speedup files in the measurements directory are overwritten!"
+
+. "$(dirname "${BASH_SOURCE[0]}")/defs.bash"
 
 [[ $# -eq 3 ]] || usage_exit
 
