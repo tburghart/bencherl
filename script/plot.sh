@@ -13,10 +13,9 @@ NOTE that *.speedup files in the measurements directory are overwritten!"
 
 [[ $# -eq 3 ]] || usage_exit
 
-for d in "$2" "$3"
-do
-    [[ -d "$d" ]] || error_exit 2 "'$d' is not a directory."
-done
+[[ -d "$2" ]] || error_exit 2 "'$d' is not a directory."
+
+[[ -d "$3" ]] || mkdir "$3"
 
 if ! /bin/ls "$2"/*.time 1>/dev/null 2>&1
 then

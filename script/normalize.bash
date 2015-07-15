@@ -160,6 +160,9 @@ export  BENCHERL_OUTPUT
 [[ -n "$BENCHERL_COOKIE" ]] || BENCHERL_COOKIE="bencherl$RANDOM"
 export  BENCHERL_COOKIE
 
+BENCHERL_PLOT="$(parse_true_false "$BENCHERL_PLOT" 'false')"
+export  BENCHERL_PLOT
+
 BENCHERL_CHECK_SANITY="$(parse_true_false "$BENCHERL_CHECK_SANITY" 'false')"
 export  BENCHERL_CHECK_SANITY
 

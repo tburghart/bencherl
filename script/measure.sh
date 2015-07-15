@@ -1,6 +1,6 @@
 #!/bin/bash -e
 
-declare -rx BENCHERL_CMD="${0##*/}"
+[[ -n "$BENCHERL_CMD" ]] || declare -rx BENCHERL_CMD="${0##*/}"
 
 _be_usage_message="Usage: $BENCHERL_CMD [option ...]
 Options:
