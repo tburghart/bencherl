@@ -65,6 +65,60 @@ declare -i  _be_sched_max=${BENCHERL_NUM_SCHEDULERS_A[$(($_be_sched_cnt - 1))]}
 declare -i  _be_slave_max=${BENCHERL_NUM_SLAVES_A[$(($_be_slave_cnt - 1))]}
 declare -i  _be_sched_cur _be_slave_cur
 
+#
+# this function is defined here, rather than in the global environment,
+# because it's *very* tightly coupled to the environment set up in this
+# file
+#
+invoke_bench()
+{
+    _be_out_file="$_be_work_odir/${_be_fn_pre}"
+    _be_out_file+=".${_be_sched_cur}.${_be_slave_cur}.output"
+    _be_time_file="$_be_work_mdir/${_be_fn_pre}.${_be_mode}.time"
+
+    echo "{bench, '$BENCHERL_BENCHNAME'}." >"$BENCHERL_BECONFIG"
+    [[ -z "$BENCHERL_BENCHCONF" ]] || \
+        echo "{bench_conf, [$BENCHERL_BENCHCONF]}." >>"$BENCHERL_BECONFIG"
+    echo "{version, '$BENCHERL_LENGTH'}." >>"$BENCHERL_BECONFIG"
+    echo "{erl_exec, \"$BENCHERL_ERL\"}." >>"$BENCHERL_BECONFIG"
+    echo "{erl_args, \"$BENCHERL_VMOPTS" $EXTRA_ERL_ARGS \
+            "+S$_be_sched_cur:$_be_sched_cur" \
+            "-setcookie '$BENCHERL_COOKIE'" \
+            "-noshell -pa $BENCHERL_CODE_DIRS\"}." >>"$BENCHERL_BECONFIG"
+    echo "{number_of_slaves, $_be_slave_cur}." >>"$BENCHERL_BECONFIG"
+    echo "{number_of_schedulers, $_be_sched_cur}." >>"$BENCHERL_BECONFIG"
+    echo "{slaves, [$BENCHERL_SLAVES]}." >>"$BENCHERL_BECONFIG"
+    echo "{master, '$BENCHERL_MASTER'}." >>"$BENCHERL_BECONFIG"
+    echo "{iterations, $BENCHERL_ITERATIONS}." >>"$BENCHERL_BECONFIG"
+    echo "{outfile, \"$_be_out_file\"}." >>"$BENCHERL_BECONFIG"
+    echo "{measfile, \"$_be_time_file\"}." >>"$BENCHERL_BECONFIG"
+    echo "{datadir, \"$BENCHERL_BENCHDIR/data\"}." >>"$BENCHERL_BECONFIG"
+    echo "{what, '$_be_mode'}." >>"$BENCHERL_BECONFIG"
+    echo "{use_long_names, $BENCHERL_USE_LONGNAMES}." >>"$BENCHERL_BECONFIG"
+    echo "{number_of_cores, $BENCHERL_CORES}." >>"$BENCHERL_BECONFIG"
+    echo "{output_format, '$BENCHERL_OUTPUT'}." >>"$BENCHERL_BECONFIG"
+    echo "{setup_slaves, $BENCHERL_SETUP_SLAVES}." >>"$BENCHERL_BECONFIG"
+    echo "{workdir, \"$_be_bench_work\"}." >>"$BENCHERL_BECONFIG"
+
+    echo -n .
+
+    declare -x  BENCHERL_NSCHED="$_be_sched_cur"
+    declare -x  BENCHERL_NSLAVE="$_be_slave_cur"
+
+    [[ ! -f "$BENCHERL_BENCHDIR/conf/pre_bench" ]] || \
+        "$BENCHERL_BENCHDIR/conf/pre_bench"
+
+    "$BENCHERL_ERL" \
+        $BENCHERL_VMOPTS $EXTRA_ERL_ARGS \
+        "+S$_be_sched_cur:$_be_sched_cur" \
+        $_be_node_param -setcookie "$BENCHERL_COOKIE" \
+        -noshell -pa $BENCHERL_CODE_DIRS \
+        -s run_bench main -s erlang halt
+
+    [[ ! -f "$BENCHERL_BENCHDIR/conf/post_bench" ]] || \
+        "$BENCHERL_BENCHDIR/conf/post_bench"
+}
+
 for _be_otp in "${BENCHERL_OTPS_A[@]}"
 do
     declare -x  BENCHERL_OTP="${_be_otp%%=*}"
@@ -79,7 +133,7 @@ do
     _be_erlrt_code="${_be_erlrt_info#* }"
     _be_erlrt_info="${_be_erlrt_info%% *}"
 
-    printf "*** Building benchmark '%s' with %s (OTP Release %u) ...\\n" \
+    printf "*** Building '%s' with %s (OTP Release %u) ...\\n" \
         "$BENCHERL_BENCHNAME" "$BENCHERL_OTP" "$_be_erlrt_info"
 
     unset _be_bench_code
@@ -98,7 +152,7 @@ do
             _be_appd="$_be_apps_work/$_be_app/$BENCHERL_OTP"
             _be_ebin="$_be_appd/ebin"
             [[ -d "$_be_ebin" ]] || mkdir -p "$_be_ebin"
-            "$_be_make" app \
+            "$_be_make" --quiet app \
                 "OTP=$BENCHERL_OTP" "ERL=$BENCHERL_ERL" "ERLC=$_be_erlc" \
                 "OTPREL=$_be_erlrt_info" "EBIN=$_be_ebin" "APPD=$_be_appd" \
                 "ERLC_OPTS=$_be_erlc_opts" "ERL_LIB_DIR=$_be_erlrt_code"
@@ -110,7 +164,7 @@ do
     cd "$BENCHERL_ROOT/suite"
     _be_ebin="$_be_suite_ebin"
     [[ -d "$_be_ebin" ]] || mkdir -p "$_be_ebin"
-    "$_be_make" suite \
+    "$_be_make" --quiet suite \
         "OTP=$BENCHERL_OTP" "ERL=$BENCHERL_ERL" "ERLC=$_be_erlc" \
         "OTPREL=$_be_erlrt_info" "EBIN=$_be_ebin" "ERL_LIB_DIR=$_be_erlrt_code"
     _be_bench_code[${#_be_bench_code[@]}]="$_be_ebin"
@@ -118,7 +172,7 @@ do
     cd "$BENCHERL_BENCHDIR"
     _be_ebin="$_be_bench_ebin"
     [[ -d "$_be_ebin" ]] || mkdir -p "$_be_ebin"
-    "$_be_make" bench \
+    "$_be_make" --quiet bench \
         "OTP=$BENCHERL_OTP" "ERL=$BENCHERL_ERL" "ERLC=$_be_erlc" \
         "OTPREL=$_be_erlrt_info" "EBIN=$_be_ebin" \
         "ERLC_OPTS=-pa ${_be_bench_code[*]}" "ERL_LIB_DIR=$_be_erlrt_code"
@@ -133,6 +187,9 @@ do
         cd "$BENCHERL_CWD"
     fi
 
+    printf "*** Benchmarking '%s' with %s " \
+        "$BENCHERL_BENCHNAME" "$BENCHERL_OTP"
+
     for _be_arg in "${BENCHERL_VMARGS_A[@]}"
     do
         declare -x  BENCHERL_VMARGS="${_be_arg%%=*}"
@@ -142,58 +199,29 @@ do
         # each num-schedulers iteration is done with the highest num-slaves
         # each num-slaves iteration is done with the highest num-schedulers
         #
-        # avoid running the overlapping test twice
-        #
-        _be_mode='sched'
-        _be_time_file="$_be_work_mdir/${_be_fn_pre}.${_be_mode}.time"
-        declare -x  BENCHERL_NSLAVE="$_be_slave_max"
-        for _be_sched_cur in ${BENCHERL_NUM_SCHEDULERS_A[@]}
-        do
-            _be_id="${_be_fn_pre}.${_be_sched_cur}.${_be_slave_max}"
-            _be_out_file="$_be_work_odir/${_be_id}.output"
-            [[ ! -f "$_be_out_file" ]] || continue
-
-            declare -x  BENCHERL_NSCHED="$_be_sched_cur"
-
-            [[ ! -f "$BENCHERL_BENCHDIR/conf/pre_bench" ]] || \
-                "$BENCHERL_BENCHDIR/conf/pre_bench"
-
-            echo "{bench, '$BENCHERL_BENCHNAME'}." >"$BENCHERL_BECONFIG"
-            echo "{version, '$BENCHERL_LENGTH'}." >>"$BENCHERL_BECONFIG"
-            echo "{erl_exec, \"$BENCHERL_ERL\"}." >>"$BENCHERL_BECONFIG"
-            echo "{erl_args, \"$BENCHERL_VMOPTS" $EXTRA_ERL_ARGS \
-                    "+S$_be_sched_cur:$_be_sched_cur" \
-                    "-setcookie '$BENCHERL_COOKIE'" \
-                    "-noshell -pa $BENCHERL_CODE_DIRS\"}." >>"$BENCHERL_BECONFIG"
-            echo "{number_of_slaves, $BENCHERL_NSLAVE}." >>"$BENCHERL_BECONFIG"
-            echo "{number_of_schedulers, $BENCHERL_NSCHED}." >>"$BENCHERL_BECONFIG"
-            echo "{slaves, [$BENCHERL_SLAVES]}." >>"$BENCHERL_BECONFIG"
-            echo "{master, '$BENCHERL_MASTER'}." >>"$BENCHERL_BECONFIG"
-            echo "{iterations, $BENCHERL_ITERATIONS}." >>"$BENCHERL_BECONFIG"
-            echo "{outfile, \"$_be_out_file\"}." >>"$BENCHERL_BECONFIG"
-            echo "{measfile, \"$_be_time_file\"}." >>"$BENCHERL_BECONFIG"
-            echo "{datadir, \"$BENCHERL_BENCHDIR/data\"}." >>"$BENCHERL_BECONFIG"
-            echo "{what, '$_be_mode'}." >>"$BENCHERL_BECONFIG"
-            echo "{use_long_names, $BENCHERL_USE_LONGNAMES}." >>"$BENCHERL_BECONFIG"
-            echo "{number_of_cores, $BENCHERL_CORES}." >>"$BENCHERL_BECONFIG"
-            echo "{output_format, '$BENCHERL_OUTPUT'}." >>"$BENCHERL_BECONFIG"
-            echo "{setup_slaves, $BENCHERL_SETUP_SLAVES}." >>"$BENCHERL_BECONFIG"
-
-            printf "*** Running '%s' with %u schedulers and %u slaves ...\\n" \
-                "$BENCHERL_BENCHNAME" "$BENCHERL_NSCHED" "$BENCHERL_NSLAVE"
-
-            "$BENCHERL_ERL" \
-                $BENCHERL_VMOPTS $EXTRA_ERL_ARGS \
-                "+S$_be_sched_cur:$_be_sched_cur" \
-                $_be_node_param -setcookie "$BENCHERL_COOKIE" \
-                -noshell -pa $BENCHERL_CODE_DIRS \
-                -s run_bench main -s erlang halt
-
-            [[ ! -f "$BENCHERL_BENCHDIR/conf/post_bench" ]] || \
-                "$BENCHERL_BENCHDIR/conf/post_bench"
-        done
+        if [[ $_be_sched_cnt -gt 1 || $_be_slave_cnt -lt 2 ]]
+        then
+            _be_mode='sched'
+            _be_slave_cur=$_be_slave_max
+            for _be_sched_cur in ${BENCHERL_NUM_SCHEDULERS_A[@]}
+            do
+                invoke_bench
+            done
+        fi
+        if [[ $_be_slave_cnt -gt 1 ]]
+        then
+            _be_mode='node'
+            _be_sched_cur=$_be_sched_max
+            for _be_slave_cur in ${BENCHERL_NUM_SLAVES_A[@]}
+            do
+                invoke_bench
+            done
+        fi
     done
     # end of "${BENCHERL_VMARGS[@]}"
+
+    # don't forget the newline!
+    echo
 done
 # end of "${BENCHERL_OTPS_A[@]}"
 
