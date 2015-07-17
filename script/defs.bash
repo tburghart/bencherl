@@ -505,7 +505,7 @@ calc_speedup()
                 index=0
                 while [[ $index -lt $count ]]
                 do
-                    bc -l <<< "scale=6; ${bases[$index]}/${times[$index]}"
+                    bc -l <<< "scale=3; ${bases[$index]}/${times[$index]}"
                     let 'index += 1'
                 done | tr "$N" "$S"
                 echo

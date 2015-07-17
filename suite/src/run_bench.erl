@@ -5,12 +5,19 @@
 
 -module(run_bench).
 
+% entry functions
 -export([main/0, main/1]).
+
+% functions spawned by MFA
+- export([run_bench/6]).
 
 -include_lib("kernel/include/inet.hrl").
 
 -spec main() -> ok | no_return().
-
+%%
+%%  @doc    Locates configuration file from OS environment and invokes
+%%          {@link main/1}.
+%%
 main() ->
     ConfigFile = case os:getenv("BENCHERL_BECONFIG") of
         false ->
@@ -19,7 +26,7 @@ main() ->
                     error_exit('BadConfig',
                         "No suitabe environment variable present");
                 Dir ->
-                    Dir ++ "/scratch/run_bench.conf"
+                    filename:join([Dir, "scratch", "run_bench.conf"])
             end;
         File ->
             File
@@ -27,7 +34,9 @@ main() ->
     main(ConfigFile).
 
 -spec main(ConfigFile :: file:filename()) -> ok | no_return().
-
+%%
+%%  @doc    Obtains configuration from a file and runs a benchmark.
+%%
 main(ConfigFile) ->
     case file:consult(ConfigFile) of
         {ok, Config} ->
@@ -38,30 +47,28 @@ main(ConfigFile) ->
             error_exit(IO, ConfigFile)
     end.
 
--spec error_exit(
-    Error   :: atom() | string(),
-    Reason  :: term())
-        -> no_return().
-
+-spec error_exit(Error :: atom() | string(), Reason :: term()) -> no_return().
+%%
+%%  @doc    Displays error message and exits.
+%%
 error_exit(Error, Reason) ->
     io:format(standard_error, "Error '~s': ~p~n", [Error, Reason]),
     erlang:halt(1).
 
--spec error_exit(
-    Error   :: atom() | string(),
-    Reason  :: term(),
-    Trace   :: [tuple()])
-        -> no_return().
-
+-spec error_exit(Error :: atom() | string(), Reason :: term(),
+    Trace :: [tuple()]) -> no_return().
+%%
+%%  @doc    Displays error message and exits.
+%%
 error_exit(Error, Reason, Trace) ->
     io:format(standard_error,
         "Exception '~s':~n~p~n~p~n", [Error, Reason, Trace]),
     erlang:halt(1).
 
--spec run_bench(
-    Config  :: [benchmark:config_rec()])
-        -> ok | no_return().
-
+-spec run_bench(Config :: benchmark:bench_conf()) -> ok | no_return().
+%%
+%%  @doc    Main implementation.
+%%
 run_bench(Config) ->
     try
         Bench   = benchmark:config_value(Config, bench),
@@ -70,7 +77,6 @@ run_bench(Config) ->
         NSlaves = benchmark:config_value(Config, number_of_slaves, 0),
         NScheds = benchmark:config_value(Config, number_of_schedulers),
         NIters  = benchmark:config_value(Config, iterations, 1),
-        NCores  = benchmark:config_value(Config, number_of_cores),
 
         MeasureCount = case benchmark:config_value(Config, what) of
             node  ->
@@ -79,36 +85,37 @@ run_bench(Config) ->
                 NScheds
         end,
 
-        % the constant Config parameter to benchmark:run/3
-        % set it up before we start doing any heavy lifting in case any
-        % required values are missing from the input configuration
-        RunBenchConf = [
-            {datadir, benchmark:config_value(Config, datadir)},
-            {master, benchmark:config_value(Config, master)},
-            {schedulers, NScheds}
-        ],
-
-	% open the output files
-        % again, fail early if config values are missing or invalid
-        {ok, Measurements} = file:open(
+        % open the output files
+        % fail early if config values are missing or invalid
+        Measurements = benchmark:open_file(
             benchmark:config_value(Config, measfile), [append]),
-        {ok, OutputSink} = file:open(
+        OutputSink = benchmark:open_file(
             benchmark:config_value(Config, outfile), [write]),
 
         % start the slaves if necessary, and store the function to stop them
-        % this is the last consumer of values from Config
         {Slaves, StopSlaves} = init_slaves(NSlaves, Config),
 
-        %
-	% function to run the benchmark once and send back results
-        %
-        RunBenchFunc = fun(Coordinator, CurArgs) ->
-            group_leader(OutputSink, self()),
-            Started = os:timestamp(),
-            Result  = Bench:run(CurArgs, Slaves, RunBenchConf),
-            Micros  = timer:now_diff(os:timestamp(), Started),
-            Coordinator ! {done, {Result, Micros}}
-        end,
+        % The constant Config parameter to benchmark:bench_args/2 and
+        % benchmark:run/3. In the first case the `version' key is redundant,
+        % but we want the `run' function to have all the information the
+        % `bench_args' function had so it can apply the same decision logic,
+        % in whatever form that takes.
+        BenchConf = [
+            {bench, Bench},
+            {bench_conf, [{
+                Bench, benchmark:config_value(
+                    benchmark:config_value(Config, bench_conf, []), Bench, [])
+            }]},
+            {schedulers, NScheds},
+            {slaves, Slaves},
+            {version, Version}
+        ] ++ [
+            {K, benchmark:config_value(Config, K)}
+                || K <- [datadir, master, number_of_cores, workdir]],
+
+        % At this point any required values missing from the input
+        % configuration should have triggerred an error, so beyond here
+        % we should have smooth sailing ...
 
         %
         % function called once per configuration to run the benchmark
@@ -120,36 +127,41 @@ run_bench(Config) ->
             % otherwise documented
             %
             RunAndAggregate = fun(RecursiveRAA, CurrentState, Results) ->
-                Coordinator = erlang:self(),
-                % In a new process, please.
-                SpawnedBenchFunc = case CurrentState of
-                    initial ->
-                        fun() ->
-                            RunBenchFunc(Coordinator, BenchArgs)
-                        end;
-                    {state, SBState} ->
-                        fun() ->
-                            RunBenchFunc(Coordinator, [SBState | BenchArgs])
-                        end
+                RunBenchArgs = [
+                    erlang:self(), OutputSink, Bench,
+                    case CurrentState of
+                        initial ->
+                            BenchArgs;
+                        {state, SBState} ->
+                            [SBState | BenchArgs]
+                    end,
+                    Slaves, BenchConf
+                ],
+                % in a new process, please
+                erlang:spawn(erlang:node(), ?MODULE, run_bench, RunBenchArgs),
+                % handle the {done, {ExecMicros, WorkMicros, BenchReturn}}
+                % message from run_bench/6
+                {WorkTime, BenchResult} = receive
+                    {done, {_, WorkMicros, BenchReturn}} ->
+                        {WorkMicros, BenchReturn}
                 end,
-                erlang:spawn(erlang:node(), SpawnedBenchFunc),
-                % handle {done, {Result, Duration}} messages from RunBenchFunc
-                % this handles a bunch of undocumented results, too
-                receive
-                    {done, {{{continue, ignore}, BenchState}, _}} ->
+                % there are a bunch of undocumented result patterns from
+                % benchmark:run/3 that get special handling
+                case BenchResult of
+                    {{{continue, ignore}, BenchState}, _} ->
                         RecursiveRAA(
                             RecursiveRAA, {state, BenchState}, Results);
-                    {done, {{{continue, Name}, BenchState}, Duration}} ->
+                    {{{continue, Name}, BenchState}, Duration} ->
                         RecursiveRAA(
                             RecursiveRAA, {state, BenchState},
                             orddict:append(Name, Duration, Results));
-                    {done, {{{done, ignore}, _}, _}} ->
+                    {{{done, ignore}, _}, _} ->
                         Results;
-                    {done, {{{done, Name}, _}, Duration}} ->
+                    {{{done, Name}, _}, Duration} ->
                         orddict:append(Name, Duration, Results);
-                    % this is the documented result from benchmark:run/3
-                    {done, {_, Duration}} ->
-                        orddict:append(standard, Duration, Results)
+                    % nothing special, just record it
+                    _ ->
+                        orddict:append(standard, WorkTime, Results)
                 end
             end,
 
@@ -176,15 +188,12 @@ run_bench(Config) ->
         end,
 
         % run the benchmark with each returned configuration
-        lists:foreach(
-            RunBench,
-            Bench:bench_args(
-                Version, [{number_of_cores, NCores}, {slaves, Slaves}])),
+        lists:foreach(RunBench, Bench:bench_args(Version, BenchConf)),
 
-	% close the measurements file
+        % close the measurements file
         file:close(Measurements),
 
-	% stop the slaves, as appropriate.
+        % stop the slaves, as appropriate.
         StopSlaves(),
 
         % close the output sink AFTER the slaves are cleaned up, in case any
@@ -196,11 +205,58 @@ run_bench(Config) ->
             error_exit(Error, Reason, erlang:get_stacktrace())
     end.
 
--spec init_slaves(
-    NSlaves :: non_neg_integer(),
-    Config  :: [benchmark:config_rec()])
-        -> {[benchmark:slave_node()], fun()} | no_return().
+-spec run_bench(
+    Coordinator :: pid() | atom() | {atom(), node()},
+    GroupLeader :: pid(),
+    Benchmark   :: module(),
+    BenchArgs   :: benchmark:bench_args(),
+    Slaves      :: benchmark:slaves(),
+    BenchConf   :: benchmark:bench_conf())
+        -> ok.
+%%
+%%  @doc    Runs the benchmark and measures its execution time.
+%%
+%%  On completion, a `{done, {ExecMicros, WorkMicros, BenchReturn}}' message
+%%  is sent to the `Coordinator`, where:
+%%
+%%  `ExecMicros' is the time, in microseconds, that the benchmark took to run.
+%%
+%%  `WorkMicros' is either the working time, in microseconds, that the
+%%  benchmark reported in its results, or `ExecMicros' if the benchmark did
+%%  not explicitly report its working time. This feature allows benchmarks to
+%%  report working time separately from startup and shutdown time in order
+%%  to provide more directly comparable results.
+%%
+%%  `BenchReturn' is the term returned by the benchmark.
+%%
+%%  Because this function is always spawned, it returns only `ok'.
+%%
+run_bench(Coordinator, GroupLeader, Benchmark, BenchArgs, Slaves, BenchConf) ->
+    erlang:group_leader(GroupLeader, self()),
+    Start   = os:timestamp(),
+    Result  = Benchmark:run(BenchArgs, Slaves, BenchConf),
+    ExecTm  = timer:now_diff(os:timestamp(), Start),
+    WorkTm  = case Result of
+        {work_time, WorkTime} ->
+            WorkTime;
+        [{work_time, WorkTime} | _] ->
+            WorkTime;
+        _ ->
+            ExecTm
+    end,
+    Coordinator ! {done, {ExecTm, WorkTm, Result}},
+    ok.
 
+-spec init_slaves(
+    NSlaves :: non_neg_integer(), Config :: benchmark:bench_conf())
+        -> {Slaves :: benchmark:slaves(), StopSlaves :: fun()} | no_return().
+%%
+%%  @doc    Initializes slaves as appropriate.
+%%
+%%  Returns a list of active slaves and the function to stop them when the
+%%  time comes to do so. If the slaves were not started by this function,
+%%  the returned function will not stop them.
+%%
 init_slaves(NumSlaves, Config) ->
     case NumSlaves > 0 of
         true ->
@@ -230,10 +286,11 @@ init_slaves(NumSlaves, Config) ->
     end.
 
 -spec slaves_start(
-    Config  :: [benchmark:config_rec()],
-    Slaves  :: [benchmark:slave_name()])
+    Config :: benchmark:bench_conf(), Slaves :: [benchmark:slave_name()])
         -> [benchmark:slave_node()] | no_return().
-
+%%
+%%  @doc    Starts specified slaves and returns them as nodes.
+%%
 slaves_start(Config, Slaves) ->
     {ok, HostName} = inet:gethostname(),
     DefaultHost = case benchmark:config_value(Config, use_long_names) of
@@ -264,15 +321,16 @@ slaves_start(Config, Slaves) ->
         Slave
     end || Sin <- Slaves].
 
-
 -spec record_times(
     IoDev   :: io:device(),
     OutForm :: atom(),
     Count   :: non_neg_integer(),
     Label   :: {string(), benchmark:bench_args()} | benchmark:bench_args(),
-    TList   :: [non_neg_integer()] ) ->
-    ok | {error, Reason :: term()}.
-
+    TList   :: [non_neg_integer()])
+         -> ok | {error, Reason :: term()}.
+%%
+%%  @doc    Formats and writes one line to a measurements file.
+%%
 record_times(IoDev, OutForm, Count, Label, TList) ->
     % times are already microseconds, keep them as integers
     Times = case OutForm of
@@ -307,12 +365,18 @@ record_times(IoDev, OutForm, Count, Label, TList) ->
     io:nl(IoDev).
 
 -spec format_time(Microsecs :: non_neg_integer()) -> string().
-
+%%
+%%  @doc    Formats a microsecond value for output in a measurements file.
+%%
+%%  The current representation is as milliseconds.
+%%
 format_time(Microsecs) ->
     io_lib:format("~.3f", [(Microsecs / 1000)]).
 
 -spec format_label(AsType :: atom(), Label :: term()) -> string().
-
+%%
+%%  @doc    Formats a measurements file record label.
+%%
 format_label(true, Label) ->
     cleanup_label(io_lib:format("~w", [Label]));
 format_label(text, Label) ->
@@ -321,10 +385,16 @@ format_label(_, Label) ->
     cleanup_label(io_lib:format("~p", [Label])).
 
 -spec cleanup_label(Text :: string()) -> string().
-
+%%
+%%  @doc    Sanitizes a measurements file record label.
+%%
 cleanup_label(Text) ->
     cleanup_label(lists:flatten(Text), []).
 
+-spec cleanup_label(Text :: string(), Result :: string()) -> string().
+%%
+%%  @doc    Recursively sanitizes a measurements file record label.
+%%
 cleanup_label([], Result) ->
     lists:reverse(Result);
 cleanup_label([$\s | Rest], Result) ->
