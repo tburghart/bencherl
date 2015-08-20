@@ -13,6 +13,9 @@
 
 -include_lib("kernel/include/inet.hrl").
 
+% time avaeraging threshhold, resolves to boolean
+-define(drop_avg_hilo(NTimes), (NTimes > 4)).
+
 -spec main() -> ok | no_return().
 %%
 %%  @doc    Locates configuration file from OS environment and invokes
@@ -333,10 +336,9 @@ record_times(IoDev, OutForm, Count, Label, TList) ->
     % times are already microseconds, keep them as integers
     Times = case OutForm of
         avg_min_max ->
-            [ (lists:sum(TList) div length(TList)),
-                lists:min(TList), lists:max(TList) ];
+            [average_time(TList), lists:min(TList), lists:max(TList)];
         avg ->
-            [lists:sum(TList) div length(TList)];
+            [average_time(TList)];
         min ->
             [lists:min(TList)];
         max ->
@@ -361,6 +363,23 @@ record_times(IoDev, OutForm, Count, Label, TList) ->
                 string:join([format_time(T) || T <- Times], " "))
     end,
     io:nl(IoDev).
+
+-spec average_time(TList :: [non_neg_integer()]) -> non_neg_integer().
+%%
+%%  @doc    Returns the average of the specified list of times.
+%%
+%%  If the number of times specified is over a predefined threshhold, the
+%%  highest and lowest values are discarded from the calculation.
+%%
+average_time(TList) ->
+    L = erlang:length(TList),
+    T = case ?drop_avg_hilo(L) of
+        true ->
+            lists:sublist(lists:sort(TList), 2, (L - 2));
+        _ ->
+            TList
+    end,
+    lists:sum(T) div erlang:length(T).
 
 -spec format_time(Microsecs :: non_neg_integer()) -> string().
 %%
