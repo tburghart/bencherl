@@ -52,8 +52,7 @@ main(ConfigFile) ->
 %%  @doc    Displays error message and exits.
 %%
 error_exit(Error, Reason) ->
-    io:format(standard_error, "Error '~s': ~p~n", [Error, Reason]),
-    erlang:halt(1).
+    error_exit(Error, Reason, []).
 
 -spec error_exit(Error :: atom() | string(), Reason :: term(),
     Trace :: [tuple()]) -> no_return().
@@ -61,8 +60,7 @@ error_exit(Error, Reason) ->
 %%  @doc    Displays error message and exits.
 %%
 error_exit(Error, Reason, Trace) ->
-    io:format(standard_error,
-        "Exception '~s':~n~p~n~p~n", [Error, Reason, Trace]),
+    benchmark:print_error(standard_error, Error, Reason, Trace),
     erlang:halt(1).
 
 -spec run_bench(Config :: benchmark:bench_conf()) -> ok | no_return().

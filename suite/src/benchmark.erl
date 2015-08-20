@@ -4,9 +4,13 @@
 -module(benchmark).
 
 -export([
-    config_value/2, config_value/3,
     bench_config/1, bench_config/2,
-    open_file/2
+    config_value/2, config_value/3,
+    open_file/2,
+    print_error/3, print_error/4,
+    temp_dir/0, temp_dir/1,
+    temp_file/0, temp_file/1,
+    tmp_dir/0
 ]).
 
 -export_type([
@@ -25,6 +29,10 @@
 -type slave_node()  :: node().
 -type slaves()      :: [slave_name()] | [slave_node()].
 
+%%======================================================================
+%%  Test API
+%%======================================================================
+
 %%
 %%  @doc    Returns the arguments to use for running the benchmark.
 %%
@@ -39,6 +47,10 @@
 %%
 -callback run(Args :: bench_args(), Slaves :: slaves(),
     Config :: bench_conf()) -> ok | {error, Reason :: term()}.
+
+%%======================================================================
+%%  Helper API
+%%======================================================================
 
 -spec bench_config(Config :: bench_conf(), Bench :: module())
         -> [config_rec()].
@@ -136,3 +148,131 @@ open_file(File, Modes) ->
             error({Reason, File})
     end.
 
+-spec print_error(Error :: atom() | string(), Reason :: term(),
+    Trace :: [tuple()]) -> ok.
+%%
+%%  @doc    Formats and prints the specified error to the group leader.
+%%
+print_error(Error, Reason, Trace) ->
+    io:format("Error '~s':\n\t~p\n", [Error, Reason]),
+    [io:format("\t~p\n", [T]) || T <- Trace],
+    ok.
+
+-spec print_error(IoDev :: atom() | file:io_device(),
+    Error :: atom() | string(), Reason :: term(), Trace :: [tuple()])
+         -> ok.
+%%
+%%  @doc    Formats and prints the specified error to the specified device.
+%%
+print_error(IoDev, Error, Reason, Trace) ->
+    io:format(IoDev, "Error '~s':\n\t~p\n", [Error, Reason]),
+    [io:format(IoDev, "\t~p\n", [T]) || T <- Trace],
+    ok.
+
+-spec temp_dir() -> file:filename().
+%%
+%%  @doc    Creates and returns the path to a newly created temporary
+%%          directory.
+%%
+temp_dir() ->
+    temp_dir(tmp_dir()).
+
+-spec temp_dir(BaseDir :: file:filename()) -> file:filename().
+%%
+%%  @doc    Creates and returns the path to a temporary directory under
+%%          the specified directory.
+%%
+temp_dir(BaseDir) ->
+    FsPath = filename:join(BaseDir, candidate_name()),
+    case file:make_dir(FsPath) of
+        ok ->
+            FsPath;
+        {error, eexist} ->
+            temp_dir(BaseDir);
+        {error, Reason} ->
+            error({Reason, FsPath})
+    end.
+
+-spec temp_file() -> file:filename().
+%%
+%%  @doc    Creates and returns the path to a newly created temporary file.
+%%
+temp_file() ->
+    temp_file(tmp_dir()).
+
+-spec temp_file(BaseDir :: file:filename()) -> file:filename().
+%%
+%%  @doc    Creates and returns the path to a newly created temporary file
+%%          under the specified directory.
+%%
+temp_file(BaseDir) ->
+    FsPath = filename:join(BaseDir, candidate_name()),
+    case file:open(FsPath, [raw, exclusive]) of
+        {ok, IoDev} ->
+            file:close(IoDev),
+            FsPath;
+        {error, eexist} ->
+            temp_file(BaseDir);
+        {error, Reason} ->
+            error({Reason, FsPath})
+    end.
+
+-spec tmp_dir() -> file:filename().
+%%
+%%  @doc    Returns the path to the default temporary directory.
+%%
+tmp_dir() ->
+    tmp_dir([
+        "BENCHERL_WORK", "TMPDIR", "TMP", "TEMP",
+        {"BENCHERL_ROOT", ["scratch"]}, {"HOME", ["tmp"]},
+        {"HOME", ["temp"]}, {fs, "/tmp"}, {fs, "/temp"},
+        "HOME"
+    ]).
+
+%%======================================================================
+%%  Internal functions
+%%======================================================================
+
+-spec candidate_name() -> string().
+% Creates a filesystem item name that might be unique.
+candidate_name() ->
+    {T1, T2, T3} = os:timestamp(),
+    Num = (T1 + T2 + T3) * random:uniform(1024 * 1024 * 1024),
+    io_lib:format("~.36b", [Num]).
+
+-spec tmp_dir(EnvVars :: [string()]) -> file:filename() | false.
+% Returns the path to the default temporary directory.
+tmp_dir([]) ->
+    file:get_cwd();
+tmp_dir([{fs, FsPath} | EnvVars]) ->
+    case file:is_dir(FsPath) of
+        true ->
+            FsPath;
+        _ ->
+            tmp_dir(EnvVars)
+    end;
+tmp_dir([{EnvVar, SubDirs} | EnvVars]) ->
+    case os:getenv(EnvVar) of
+        false ->
+            tmp_dir(EnvVars);
+        Dir ->
+            DirPath = filename:join([Dir | SubDirs]),
+            case file:is_dir(DirPath) of
+                true ->
+                    DirPath;
+                _ ->
+                    tmp_dir(EnvVars)
+            end
+    end;
+tmp_dir([EnvVar | EnvVars]) ->
+    case os:getenv(EnvVar) of
+        false ->
+            tmp_dir(EnvVars);
+        Dir ->
+            case file:is_dir(Dir) of
+                true ->
+                    Dir;
+                _ ->
+                    tmp_dir(EnvVars)
+            end
+    end.
