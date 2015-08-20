@@ -456,7 +456,7 @@ EOF
         label="${label% }"
         # for errorbars instead use:
         #echo -n "$delim '-' using 1:2:3:4 title '$label' w yerrorlines lw 2"
-        echo -n "$delim '-' using 1:2 title '${label//_/-}' w l lw 2"
+        echo -n "$delim '-' using 1:2 title '$label' w l lw 2"
         [[ -n "$delim" ]] || delim=','
     done >>"$pfile"
     echo >>"$pfile"
@@ -561,63 +561,81 @@ plot_benchmark_type()
     esac
     local fext="$xtype.$ytype"
 
+    # if there are no files of the specified type, we're done
+    if ! /bin/ls "$mdir"/?*.?*.$fext 1>/dev/null 2>&1
+    then
+        IFS="$ifsin"
+        return 0
+    fi
+
     local tmp ifile
     local otps='' cfgs=''
-    for ifile in "$mdir"/*.*.$fext
+    for ifile in "$mdir"/?*.?*.$fext
     do
-        # break out if there are no files
-        [[ -f "$ifile" ]] || break
-
         tmp="$(basename "$ifile" ".$fext")"
         otps+=" ${tmp%%.*}"
         cfgs+=" ${tmp##*.}"
     done
-    if [[ -n "$otps" ]]
+
+    otps="$(sort_and_dedup_text $otps)"
+    local -i notps="$(count_list $otps)"
+
+    cfgs="$(sort_and_dedup_text $cfgs)"
+    local -i ncfgs="$(count_list $cfgs)"
+
+    local label ofile cfg otp
+    local patt="^\\([^${T}]*\\)${T}\\(.*\\)\$"
+
+    for otp in $otps
+    do
+        ofile="$mdir/$otp.$fext"
+        for ifile in "$mdir"/$otp.?*.$fext
+        do
+            label="$(basename "$ifile" ".$fext")"
+            sed "s/${patt}/\\1${T}${label}${S}\\2/" "$ifile"
+        done >"$ofile"
+
+        plot_graph \
+            "$bench - $otp" "$xaxis" "$yaxis" \
+            "$ofile" "$gdir/${ofile##*/}.svg"
+    done
+
+    for cfg in $cfgs
+    do
+        ofile="$mdir/$cfg.$fext"
+        for ifile in "$mdir"/?*.$cfg.$fext
+        do
+            label="$(basename "$ifile" ".$fext")"
+            sed "s/${patt}/\\1${T}${label}${S}\\2/" "$ifile"
+        done >"$ofile"
+
+        plot_graph \
+            "$bench - $cfg" "$xaxis" "$yaxis" \
+            "$ofile" "$gdir/${ofile##*/}.svg"
+    done
+
+    if [[ $ncfgs -gt 1 && $notps -gt 1 ]]
     then
-        otps="$(sort_and_dedup_text $otps)"
-        local -i notps="$(count_list $otps)"
-
-        cfgs="$(sort_and_dedup_text $cfgs)"
-        local -i ncfgs="$(count_list $cfgs)"
-
-        local label ofile
-        local patt="^\\([^${T}]*\\)${T}\\(.*\\)\$"
-
-        if [[ $ncfgs -gt 1 ]]
+        local elem elems
+        ofile="$mdir/Combined.$fext"
+        # can use either $cfgs or $otps, both have the same data
+        # use the shorter list of files
+        if [[ $notps -lt $ncfgs ]]
         then
-            local otp
-            for otp in $otps
-            do
-                ofile="$mdir/$otp.$fext"
-                for ifile in "$mdir"/$otp.*.$fext
-                do
-                    label="$(basename "$ifile" ".$fext")"
-                    sed "s/${patt}/\\1${T}${label}${S}\\2/" "$ifile"
-                done >"$ofile"
-
-                plot_graph \
-                    "$bench - $otp" "$xaxis" "$yaxis" \
-                    "$ofile" "$gdir/$otp.$fext.svg"
-            done
+            elems="$otps"
+        else
+            elems="$cfgs"
         fi
-        if [[ $notps -gt 1 ]]
-        then
-            local cfg
-            for cfg in $cfgs
-            do
-                ofile="$mdir/$cfg.$fext"
-                for ifile in "$mdir"/*.$cfg.$fext
-                do
-                    label="$(basename "$ifile" ".$fext")"
-                    sed "s/${patt}/\\1${T}${label}${S}\\2/" "$ifile"
-                done >"$ofile"
+        for elem in $elems
+        do
+            cat "$mdir/$elem.$fext"
+        done >"$ofile"
 
-                plot_graph \
-                    "$bench - $cfg" "$xaxis" "$yaxis" \
-                    "$ofile" "$gdir/$cfg.$fext.svg"
-            done
-        fi
+        plot_graph \
+            "$bench - Combined" "$xaxis" "$yaxis" \
+            "$ofile" "$gdir/${ofile##*/}.svg"
     fi
+
     IFS="$ifsin"
 }
 
@@ -639,9 +657,9 @@ plot_benchmark()
     IFS="$IFS_DEFAULT"
     for type in node sched
     do
-        if /bin/ls "$mdir"/*.*.$type.time 1>/dev/null 2>&1
+        if /bin/ls "$mdir"/?*.?*.$type.time 1>/dev/null 2>&1
         then
-            for file in "$mdir"/*.*.$type.time
+            for file in "$mdir"/?*.?*.$type.time
             do
                 calc_speedup "$file" "${file%.time}.speedup"
             done
