@@ -231,6 +231,15 @@ then
 fi
 if ls "$_be_work_mdir"/* 1>/dev/null 2>&1
 then
-    cp -p "$_be_work_mdir"/* "$_be_bench_mdir"
+    # TODO: make this configurable
+    if false
+    then
+        for _be_elem in "$_be_work_mdir"/*
+        do
+            cat "$_be_elem" >> "$_be_bench_mdir/${_be_elem##*/}"
+        done
+    else
+        cp -p "$_be_work_mdir"/* "$_be_bench_mdir"
+    fi
 fi
 
