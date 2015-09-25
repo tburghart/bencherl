@@ -40,8 +40,13 @@
 
 -define(MODES, [wheel, no_wheel]).
 
-% 2^30 milliseconds, a *very* long time
--define(TIMEOUT, 1073741824).
+% use a range of timeouts to scatter them around the wheel
+% min should be enought to make sure timeouts don't actually occur
+% max is 2^30 milliseconds, a *very* long time
+-define(MAX_TIMEOUT, 1073741824).
+-define(MIN_TIMEOUT, 9876).
+-define(TIMEOUT_RANGE, (?MAX_TIMEOUT - ?MIN_TIMEOUT)).
+-define(TIMEOUT_EXIT_THRESHHOLD, 59876).
 
 bench_args(Version, Config) ->
     NCores  = benchmark:config_value(Config, number_of_cores),
@@ -51,83 +56,107 @@ bench_args(Version, Config) ->
         short ->
             16;
         intermediate ->
-            40;
+            67;
         long ->
-            125
+            321
     end,
     [[Mode, Count] || Mode <- Modes].
 
 run([wheel, Count | _], Slaves, Config) ->
-    test(Count, Slaves, Config, fun recv_loop_after/3);
+    test(Count, Slaves, Config, true);
 run([no_wheel, Count | _], Slaves, Config) ->
-    test(Count, Slaves, Config, fun recv_loop/3).
+    test(Count, Slaves, Config, false).
 
 wheel(Count) ->
-    test(Count, [], [], fun recv_loop_after/3).
+    test(Count, [], [], true).
 
 no_wheel(Count) ->
-    test(Count, [], [], fun recv_loop/3).
+    test(Count, [], [], false).
 
-test(Count, _Slaves, _Config, RecvLoopFun)
+test(Count, _Slaves, _Config, WithTimeouts)
          when erlang:is_integer(Count) andalso Count > 0 ->
     Started = os:timestamp(),
     Manager = self(),
-    RunArgs = [Count - 1, RecvLoopFun, Manager],
-    Workers = [erlang:spawn_link(?MODULE, run_test, RunArgs)
-                || _ <- lists:seq(1, Count)],
-    InitMsg = {init, Workers},
+    RunArgs = [Count, Manager, WithTimeouts],
+    Workers = start_workers(Count, RunArgs, []),
+    InitMsg = {Manager, init, Workers},
+    RunMsg  = {Manager, start},
     [Worker ! InitMsg || Worker <- Workers],
     [receive {Worker, ready} -> ok end || Worker <- Workers],
     Inited  = os:timestamp(),
-    [Worker ! start || Worker <- Workers],
+    [Worker ! RunMsg || Worker <- Workers],
     [receive {Worker, done} -> ok end || Worker <- Workers],
     Elapsed = timer:now_diff(os:timestamp(), Inited),
     [{work_time, Elapsed}, {exec_time,  timer:now_diff(os:timestamp(), Started)}].
 
-run_test(NLoops, RecvLoopFun, Manager) ->
+start_workers(0, _, Workers) ->
+    Workers;
+start_workers(N, RunArgs, Workers) ->
+    start_workers((N - 1), RunArgs,
+        [erlang:spawn_link(?MODULE, run_test, RunArgs) | Workers]).
+
+run_test(Count, Manager, WithTimeouts) ->
     MyPid = self(),
+    % pre-allocate the timeouts so the RNG time isn't included in measurement
+    % this can run while peers are being started ...
+    State = case WithTimeouts of
+        true ->
+            {Rs1, Rs2, Rs3} = os:timestamp(),
+            random:seed((Rs1 + erlang:phash2(MyPid)), Rs2, Rs3),
+            % shouldn't get *any* timeouts, but add a few spares
+            timeout_list((Count + (Count div 9) + 1), []);
+        _ ->
+            % erlang:length(Peers) *should* be (Count - 1)
+            (Count - 1)
+    end,
+    % ... by now the list of peers should be just about ready
     Peers = receive
-        {init, Workers} ->
+        {Manager, init, Workers} ->
             Workers -- [MyPid]
     end,
+    Ping = {MyPid, ping},
+    Pong = {MyPid, pong},
     Manager ! {MyPid, ready},
     receive
-        start ->
-            ok
+        {Manager, start} ->
+            [Peer ! Ping || Peer <- Peers]
     end,
-    loop({MyPid, ping}, {MyPid, pong}, Peers, NLoops, RecvLoopFun, Manager).
+    R = loop(Peers, State, Manager, Pong),
+    Manager ! {MyPid, done},
+    R.
 
-loop({MyPid, _}, _, [], 0, _, Manager) ->
-    Manager ! {MyPid, done};
-loop(Ping, Pong, [], NLoops, RecvLoopFun, Manager) ->
-    loop(Ping, Pong, [],
-         RecvLoopFun(Pong, undefined, NLoops), RecvLoopFun, Manager);
-loop(Ping, Pong, [Peer|Peers], NLoops, RecvLoopFun, Manager) ->
-    Peer ! Ping,
-    loop(Ping, Pong, Peers,
-        RecvLoopFun(Pong, Peer, NLoops), RecvLoopFun, Manager).
-
-recv_loop_after(_, _, 0) ->
-    0;
-recv_loop_after({MyPid, _} = Pong, Peer, NLoops) ->
+loop([], _, _, _) ->
+    ok;
+loop([Peer | RemPeers] = Peers, [TO | RemTOs] = TOs, Manager, {MyPid, _} = Pong) ->
     receive
         {Peer, pong} ->
-            NLoops;
+            loop(RemPeers, RemTOs, Manager, Pong);
         {Other, ping} ->
             Other ! Pong,
-            recv_loop_after(Pong, Peer, NLoops - 1)
-        after ?TIMEOUT ->
-            exit(MyPid, kill)
-    end.
-
-recv_loop(_, _, 0) ->
-    0;
-recv_loop(Pong, Peer, NLoops) ->
+            loop(Peers, TOs, Manager, Pong)
+    after TO ->
+        case continue_after_timeout(TO) of
+            true ->
+                loop(Peers, RemTOs, Manager, Pong);
+            _ ->
+                exit(MyPid, kill)
+        end
+    end;
+loop([Peer | RemPeers] = Peers, NLoops, Manager, Pong) ->
     receive
         {Peer, pong} ->
-            NLoops;
+            loop(RemPeers, (NLoops - 1), Manager, Pong);
         {Other, ping} ->
             Other ! Pong,
-            recv_loop(Pong, Peer, NLoops - 1)
+            loop(Peers, NLoops, Manager, Pong)
     end.
+
+timeout_list(0, Timeouts) ->
+    Timeouts;
+timeout_list(Count, Timeouts) ->
+    timeout_list((Count - 1),
+        [(?MIN_TIMEOUT + random:uniform(?TIMEOUT_RANGE)) | Timeouts]).
+
+continue_after_timeout(Timeout) ->
+    Timeout < ?TIMEOUT_EXIT_THRESHHOLD.
 
