@@ -16,6 +16,9 @@
 % time avaeraging threshhold, resolves to boolean
 -define(drop_avg_hilo(NTimes), (NTimes > 4)).
 
+% number of microseconds to let ERTS timing stuff get warmed up
+-define(ERTS_WARMUP_MICROS, 1012345).
+
 -spec main() -> ok | no_return().
 %%
 %%  @doc    Locates configuration file from OS environment and invokes
@@ -72,6 +75,7 @@ error_exit(Error, Reason, Trace) ->
 %%
 run_bench(Config) ->
     try
+        WarmTS  = warmup_end_ts(),
         Bench   = benchmark:config_value(Config, bench),
         Version = benchmark:config_value(Config, version, short),
         OutForm = benchmark:config_value(Config, output_format, 'avg_min_max'),
@@ -188,6 +192,8 @@ run_bench(Config) ->
             end
         end,
 
+        burn_time_until(WarmTS),
+
         % run the benchmark with each returned configuration
         lists:foreach(RunBench, Bench:bench_args(Version, BenchConf)),
 
@@ -204,6 +210,42 @@ run_bench(Config) ->
     catch
         Error:Reason ->
             error_exit(Error, Reason, erlang:get_stacktrace())
+    end.
+
+-spec warmup_end_ts() -> erlang:timestamp().
+%%
+%%  @doc    Calculate the time at which ERTS will be considered 'warmed up'.
+%%
+%%  Returns the timestamp at which we consider the runtime system to be ready
+%%  to run time-sensitive tests.
+%%
+warmup_end_ts() ->
+    {S1, S2, S3} = erlang:now(),
+    E3 = (S3 + ?ERTS_WARMUP_MICROS),
+    E2 = (S2 + (E3 div 1000000)),
+    E1 = (S1 + (E2 div 1000000)),
+    {E1, (E2 rem 1000000), (E3 rem 1000000)}.
+
+-spec burn_time_until(UntilTS :: erlang:timestamp()) -> ok.
+%%
+%%  @doc    Waste time until the specified time.
+%%
+%%  Time is consumed in relatively short increments, using the most expensive
+%%  mechanism in an effort to make sure the tolerant_timeofday implementation
+%%  (if active) is fully initialized.
+%%
+burn_time_until(UntilTS) ->
+    TsDiff = timer:now_diff(UntilTS, erlang:now()),
+    % diff is microseconds, sleep is milliseconds
+    if
+        TsDiff > 3000 ->
+            timer:sleep(TsDiff div 3000),
+            burn_time_until(UntilTS);
+        TsDiff > 0 ->
+            timer:sleep(1),
+            burn_time_until(UntilTS);
+        true ->
+            ok
     end.
 
 -spec run_bench(
