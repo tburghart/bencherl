@@ -384,7 +384,7 @@ otp_info()
     cmds+=', {MV, _} = string:to_integer(VS)'
     cmds+=', io:format("~b ~s~n", [MV, code:lib_dir()])'
     cmds+=', halt().'
-    "$erl" -noshell -eval "$cmds"
+    "$erl" -noshell -eval "$cmds" 2>/dev/null
 }
 
 #
