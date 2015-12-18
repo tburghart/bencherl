@@ -4,30 +4,62 @@
 -module(benchmark).
 
 -export([
-    bench_config/1, bench_config/2,
-    config_value/2, config_value/3,
+    bench_config/1,
+    bench_config/2,
+    clean_label/1,
+    config_value/2,
+    config_value/3,
     open_file/2,
-    print_error/3, print_error/4,
-    temp_dir/0, temp_dir/1,
-    temp_file/0, temp_file/1,
+    print_error/3,
+    print_error/4,
+    temp_dir/0,
+    temp_dir/1,
+    temp_file/0,
+    temp_file/1,
     tmp_dir/0
 ]).
 
 -export_type([
-    bench_args/0, bench_conf/0, bench_vers/0,
-    config_key/0, config_rec/0, config_val/0,
-    slave_name/0, slave_node/0, slaves/0
+    bench_arg/0,
+    bench_args/0,
+    bench_conf/0,
+    bench_label/0,
+    bench_result/0,
+    bench_vers/0,
+    config_key/0,
+    config_rec/0,
+    config_val/0,
+    error_reason/0,
+    error_result/0,
+    microsecs/0,
+    named_args/0,
+    plain_args/0,
+    result_time/0,
+    slave_name/0,
+    slave_node/0,
+    slaves/0,
+    time_key/0
 ]).
 
--type bench_args()  :: [term()].
+-type bench_arg()   :: term().
+-type bench_args()  :: plain_args() | named_args().
 -type bench_conf()  :: [config_rec()].
+-type bench_label() :: term().
+-type bench_result():: ok | [result_time()] | error_result().
 -type bench_vers()  :: short | intermediate | long.
 -type config_key()  :: atom().
 -type config_rec()  :: {config_key(), config_val()}.
 -type config_val()  :: term().
+-type error_reason():: term().
+-type error_result():: {error, error_reason()}.
+-type microsecs()   :: non_neg_integer().
+-type named_args()  :: {bench_label(), plain_args()}.
+-type plain_args()  :: [bench_arg()].
+-type result_time() :: {time_key(), microsecs()}.
 -type slave_name()  :: atom().
 -type slave_node()  :: node().
 -type slaves()      :: [slave_name()] | [slave_node()].
+-type time_key()    :: work_time | exec_time.
 
 %%======================================================================
 %%  Test API
@@ -36,17 +68,20 @@
 %%
 %%  @doc    Returns the arguments to use for running the benchmark.
 %%
-%%  The returned list is provided to {@link run/3} in its `Args` parameter.
+%%  The plain_args() component of each result list element is provided to one
+%%  invocation of {@link run/3} as its `Args` parameter.
+%%
+%%  If an element is a tuple
 %%
 -callback bench_args(Version :: bench_vers(), Config :: bench_conf())
-        -> bench_args().
+        -> [bench_args()].
 
 %%
 %%  @doc    Runs the benchmark using the specified arguments.
 %%
 %%
--callback run(Args :: bench_args(), Slaves :: slaves(),
-    Config :: bench_conf()) -> ok | {error, Reason :: term()}.
+-callback run(Args :: plain_args(), Slaves :: slaves(),
+    Config :: bench_conf()) -> bench_result().
 
 %%======================================================================
 %%  Helper API
@@ -100,6 +135,15 @@ bench_config(Config, Bench) ->
 %%
 bench_config(Config) ->
     bench_config(Config, config_value(Config, bench)).
+
+-spec clean_label(Term :: atom() | string()) -> string().
+%%
+%%  @doc    Returns a string transformed not to include gnuplot escapes.
+%%
+clean_label(Label) when is_atom(Label) ->
+    clean_label(atom_to_list(Label));
+clean_label(Label) when is_list(Label) ->
+    [gnuplot_safe_char(Ch) || Ch <- Label].
 
 -spec config_value(Config :: bench_conf(), Key :: config_key())
         -> config_val() | no_return().
@@ -239,6 +283,13 @@ candidate_name() ->
     {T1, T2, T3} = os:timestamp(),
     Num = (T1 + T2 + T3) * random:uniform(1024 * 1024 * 1024),
     io_lib:format("~.36b", [Num]).
+
+-spec gnuplot_safe_char(Ch :: byte()) -> byte().
+% Returns a character that won't be treated as an escape by gnuplot.
+gnuplot_safe_char($_) ->
+    $-;
+gnuplot_safe_char(Ch) ->
+    Ch.
 
 -spec tmp_dir(EnvVars :: [string()]) -> file:filename() | false.
 % Returns the path to the default temporary directory.
