@@ -38,13 +38,29 @@ version_multiplier(_) -> 3.
 %% Config & Dispatch
 %% -------------------------------------------------------------------
 
+-spec bench_args(
+    Version :: benchmark:bench_vers(),
+    Config  :: benchmark:bench_conf())
+        -> [benchmark:named_args()].
+
 bench_args(Version, Config) ->
     NCores  = benchmark:config_value(Config, number_of_cores),
     BeConf  = benchmark:bench_config(Config),
     Modes   = benchmark:config_value(BeConf, modes, ?MODES),
     MRpC    = benchmark:config_value(BeConf, ?MRC_ATOM, ?MRC_DFLT),
     MRefs   = NCores * MRpC * version_multiplier(Version),
-    [[Mode, MRefs] || Mode <- Modes].
+    Args    = [[Mode, MRefs] || Mode <- Modes],
+    [{bench_label(A), A} || A <- Args].
+
+bench_label([Mode, MRefs]) ->
+    {text, lists:flatten(io_lib:format(
+        "[~s,~bM]", [benchmark:clean_label(Mode), MRefs]))}.
+
+-spec run(
+    Args    :: benchmark:plain_args(),
+    Slaves  :: benchmark:slaves(),
+    Config  :: benchmark:bench_conf())
+        -> [benchmark:result_time()].
 
 run([Mode, MRefs], Slaves, Config) ->
     NScheds = erlang:system_info(schedulers),

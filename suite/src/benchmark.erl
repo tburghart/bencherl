@@ -44,7 +44,7 @@
 -type bench_arg()   :: term().
 -type bench_args()  :: plain_args() | named_args().
 -type bench_conf()  :: [config_rec()].
--type bench_label() :: term().
+-type bench_label() :: {text, string()} | term().
 -type bench_result():: ok | [result_time()] | error_result().
 -type bench_vers()  :: short | intermediate | long.
 -type config_key()  :: atom().

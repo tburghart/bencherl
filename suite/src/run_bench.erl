@@ -17,7 +17,7 @@
 -define(drop_avg_hilo(NTimes), (NTimes > 4)).
 
 % number of microseconds to let ERTS timing stuff get warmed up
--define(ERTS_WARMUP_MICROS, 1012345).
+-define(ERTS_WARMUP_MICROS, 123456).
 
 -spec main() -> ok | no_return().
 %%
@@ -131,11 +131,11 @@ run_bench(Config) ->
             % recursive behavior occurs via benchmark results that aren't
             % otherwise documented
             %
-            BenchArgs = case InArgs of
-                {_Label, Args} ->
-                    Args;
+            {LabelArgs, BenchArgs} = case InArgs of
+                {Label, Args} ->
+                    {Label, Args};
                 Args ->
-                    Args
+                    {Args, Args}
             end,
             RunAndAggregate = fun(RecursiveRAA, CurrentState, Results) ->
                 RunBenchArgs = [
@@ -187,26 +187,30 @@ run_bench(Config) ->
                 [{standard, Times}] ->
                     record_times(
                         Measurements, OutForm, MeasureCount,
-                        BenchArgs, Times);
+                        LabelArgs, Times);
                 TimeRecs ->
                     lists:foreach(
                         fun({Name, Times}) ->
                             record_times(
                                 Measurements, OutForm, MeasureCount,
-                                {Name, BenchArgs}, Times)
+                                {Name, LabelArgs}, Times)
                         end, TimeRecs)
             end
         end,
 
+        % get benchmark configurations to run
+        RunArgs = Bench:bench_args(Version, BenchConf),
+
+        % let remaining warmup time (if any) elapse
         burn_time_until(WarmTS),
 
         % run the benchmark with each returned configuration
-        lists:foreach(RunBench, Bench:bench_args(Version, BenchConf)),
+        lists:foreach(RunBench, RunArgs),
 
         % close the measurements file
         file:close(Measurements),
 
-        % stop the slaves, as appropriate.
+        % stop the slaves, as appropriate
         StopSlaves(),
 
         % close the output sink AFTER the slaves are cleaned up, in case any
@@ -405,6 +409,9 @@ record_times(IoDev, OutForm, Count, Label, TList) ->
             TList
     end,
     case Label of
+        {Type, LabelArgs} when is_atom(Type) ->
+            Formatted = format_label(Type, LabelArgs),
+            io:format(IoDev, "\t~s\t~p\t", [Formatted, Count]);
         {Name, BenchArgs} ->
             Formatted = format_label(false, Name),
             io:format(IoDev, "~s\t~w\t~p\t", [Formatted, BenchArgs, Count]);
