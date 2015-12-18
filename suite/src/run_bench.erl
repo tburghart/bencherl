@@ -125,12 +125,18 @@ run_bench(Config) ->
         %
         % function called once per configuration to run the benchmark
         %
-        RunBench = fun(BenchArgs) ->
+        RunBench = fun(InArgs) ->
             %
             % function called once per iteration, possibly recursively -
             % recursive behavior occurs via benchmark results that aren't
             % otherwise documented
             %
+            BenchArgs = case InArgs of
+                {_Label, Args} ->
+                    Args;
+                Args ->
+                    Args
+            end,
             RunAndAggregate = fun(RecursiveRAA, CurrentState, Results) ->
                 RunBenchArgs = [
                     erlang:self(), OutputSink, Bench,
@@ -278,17 +284,27 @@ run_bench(Coordinator, GroupLeader, Benchmark, BenchArgs, Slaves, BenchConf) ->
     erlang:group_leader(GroupLeader, self()),
     Start   = os:timestamp(),
     Result  = Benchmark:run(BenchArgs, Slaves, BenchConf),
-    ExecTm  = timer:now_diff(os:timestamp(), Start),
-    WorkTm  = case Result of
-        {work_time, WorkTime} ->
-            WorkTime;
-        [{work_time, WorkTime} | _] ->
-            WorkTime;
-        _ ->
-            ExecTm
-    end,
+    BenchTm = timer:now_diff(os:timestamp(), Start),
+    ExecTm  = result_term(exec_time, BenchTm, Result),
+    WorkTm  = result_term(work_time, ExecTm, Result),
     Coordinator ! {done, {ExecTm, WorkTm, Result}},
     ok.
+
+-spec result_term(Key :: atom(), Default :: term(), Results :: term())
+        -> term().
+%%
+%%  @doc    Returns the specified result, or a default, from a result set.
+%%
+result_term(Key, _, Key) ->
+    Key;
+result_term(Key, _, {Key, Result}) ->
+    Result;
+result_term(Key, _, [{Key, Result} | _]) ->
+    Result;
+result_term(Key, Default, [_ | Results]) ->
+    result_term(Key, Default, Results);
+result_term(_, Default, _) ->
+    Default.
 
 -spec init_slaves(
     NSlaves :: non_neg_integer(), Config :: benchmark:bench_conf())
